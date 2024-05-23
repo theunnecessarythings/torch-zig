@@ -1,0 +1,19 @@
+# dune build
+# OCAMLPARAM: unset
+# Shared cache: disabled
+# Shared cache location: /home/sreeraj/.cache/dune/db
+# Workspace root: /home/sreeraj/Documents/torch-zig/gen
+# Auto-detected concurrency: 16
+# Dune context:
+#  { name = "default"
+#  ; kind = "default"
+#  ; profile = Dev
+#  ; merlin = true
+#  ; fdo_target_exe = None
+#  ; build_dir = In_build_dir "default"
+#  ; instrument_with = []
+#  }
+$ /home/sreeraj/.opam/default/bin/ocamlc.opt -config > /tmp/dune_b06b1d_output
+$ (cd _build/default && .ppx/6fd25187b0e70872735b78e12e8bdfcf/ppx.exe -o gen.pp.ml --impl gen.ml -corrected-suffix .ppx-corrected -diff-cmd - -dump-ast)
+$ (cd _build/default && /home/sreeraj/.opam/default/bin/ocamlopt.opt -w @1..3@5..28@30..39@43@46..47@49..57@61..62-40 -strict-sequence -strict-formats -short-paths -keep-locs -g -I .gen.eobjs/byte -I .gen.eobjs/native -I /home/sreeraj/.opam/default/lib/base -I /home/sreeraj/.opam/default/lib/base/base_internalhash_types -I /home/sreeraj/.opam/default/lib/base/caml -I /home/sreeraj/.opam/default/lib/base/shadow_stdlib -I /home/sreeraj/.opam/default/lib/bigarray-compat -I /home/sreeraj/.opam/default/lib/ctypes -I /home/sreeraj/.opam/default/lib/ctypes/stubs -I /home/sreeraj/.opam/default/lib/integers -I /home/sreeraj/.opam/default/lib/ocaml/str -I /home/sreeraj/.opam/default/lib/sexplib0 -I /home/sreeraj/.opam/default/lib/stdio -I /home/sreeraj/.opam/default/lib/stdlib-shims -I /home/sreeraj/.opam/default/lib/yaml -I /home/sreeraj/.opam/default/lib/yaml/bindings -I /home/sreeraj/.opam/default/lib/yaml/bindings/types -I /home/sreeraj/.opam/default/lib/yaml/c -I /home/sreeraj/.opam/default/lib/yaml/ffi -I /home/sreeraj/.opam/default/lib/yaml/types -intf-suffix .ml -no-alias-deps -opaque -o .gen.eobjs/native/dune__exe__Gen.cmx -c -impl gen.pp.ml)
+$ (cd _build/default && /home/sreeraj/.opam/default/bin/ocamlopt.opt -w @1..3@5..28@30..39@43@46..47@49..57@61..62-40 -strict-sequence -strict-formats -short-paths -keep-locs -g -o gen.exe /home/sreeraj/.opam/default/lib/base/base_internalhash_types/base_internalhash_types.cmxa -I /home/sreeraj/.opam/default/lib/base/base_internalhash_types /home/sreeraj/.opam/default/lib/base/caml/caml.cmxa /home/sreeraj/.opam/default/lib/sexplib0/sexplib0.cmxa /home/sreeraj/.opam/default/lib/base/shadow_stdlib/shadow_stdlib.cmxa /home/sreeraj/.opam/default/lib/base/base.cmxa -I /home/sreeraj/.opam/default/lib/base /home/sreeraj/.opam/default/lib/stdio/stdio.cmxa /home/sreeraj/.opam/default/lib/stdlib-shims/stdlib_shims.cmxa /home/sreeraj/.opam/default/lib/integers/integers.cmxa -I /home/sreeraj/.opam/default/lib/integers /home/sreeraj/.opam/default/lib/bigarray-compat/bigarray_compat.cmxa /home/sreeraj/.opam/default/lib/ctypes/ctypes.cmxa -I /home/sreeraj/.opam/default/lib/ctypes /home/sreeraj/.opam/default/lib/ocaml/str/str.cmxa /home/sreeraj/.opam/default/lib/ctypes/stubs/ctypes_stubs.cmxa /home/sreeraj/.opam/default/lib/yaml/bindings/types/yaml_bindings_types.cmxa /home/sreeraj/.opam/default/lib/yaml/types/yaml_types.cmxa /home/sreeraj/.opam/default/lib/yaml/bindings/yaml_bindings.cmxa /home/sreeraj/.opam/default/lib/yaml/c/yaml_c.cmxa -I /home/sreeraj/.opam/default/lib/yaml/c /home/sreeraj/.opam/default/lib/yaml/ffi/yaml_ffi.cmxa -I /home/sreeraj/.opam/default/lib/yaml/ffi /home/sreeraj/.opam/default/lib/yaml/yaml.cmxa .gen.eobjs/native/dune__exe__Gen.cmx)
