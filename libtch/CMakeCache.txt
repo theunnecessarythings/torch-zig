@@ -216,7 +216,7 @@ CMAKE_VERBOSE_MAKEFILE:BOOL=FALSE
 Caffe2_DIR:PATH=/usr/local/share/cmake/Caffe2
 
 //Path to a library.
-LIBNVTOOLSEXT:FILEPATH=LIBNVTOOLSEXT-NOTFOUND
+LIBNVTOOLSEXT:FILEPATH=/usr/local/cuda/lib64/libnvToolsExt.so
 
 //The directory containing a CMake configuration file for MKLDNN.
 MKLDNN_DIR:PATH=MKLDNN_DIR-NOTFOUND
@@ -226,6 +226,9 @@ MKL_DIR:PATH=MKL_DIR-NOTFOUND
 
 //Path to a library.
 TORCH_LIBRARY:FILEPATH=/usr/local/lib/libtorch.so
+
+//The directory containing a CMake configuration file for Torch.
+Torch_DIR:PATH=/usr/local/share/cmake/Torch
 
 //Path to a library.
 c10_LIBRARY:FILEPATH=/usr/local/lib/libc10.so
@@ -240,7 +243,7 @@ tch_BINARY_DIR:STATIC=/home/sreeraj/Documents/torch-zig/libtch
 tch_IS_TOP_LEVEL:STATIC=ON
 
 //Dependencies for the target
-tch_LIB_DEPENDS:STATIC=general;torch;torch_library;/usr/local/lib/libc10.so;/usr/local/lib/libkineto.a;LIBNVTOOLSEXT-NOTFOUND;/home/sreeraj/libtorch/lib/libc10_cuda.so;general;stdc++;
+tch_LIB_DEPENDS:STATIC=general;torch;torch_library;/usr/local/lib/libc10.so;/usr/local/lib/libkineto.a;/usr/local/cuda/lib64/libnvToolsExt.so;/home/sreeraj/libtorch/lib/libc10_cuda.so;general;stdc++;
 
 //Value Computed by CMake
 tch_SOURCE_DIR:STATIC=/home/sreeraj/Documents/torch-zig/libtch

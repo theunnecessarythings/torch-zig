@@ -13,11 +13,11 @@ const Tensor = @import("tensor.zig").Tensor;
 // TODO: Do we name the stuff here proper, or follow tch-rs and its conventions?
 
 pub const FLOAT_CPU = TensorOptions{ .kind = Kind.Float, .device = Device.Cpu };
-pub const FLOAT_CUDA = TensorOptions{ .kind = Kind.Float, .device = Device.Cuda(0) };
+pub const FLOAT_CUDA = TensorOptions{ .kind = Kind.Float, .device = .{ .Cuda = 0 } };
 pub const DOUBLE_CPU = TensorOptions{ .kind = Kind.Double, .device = Device.Cpu };
-pub const DOUBLE_CUDA = TensorOptions{ .kind = Kind.Double, .device = Device.Cuda(0) };
+pub const DOUBLE_CUDA = TensorOptions{ .kind = Kind.Double, .device = .{ .Cuda = 0 } };
 pub const INT64_CPU = TensorOptions{ .kind = Kind.Int64, .device = Device.Cpu };
-pub const INT64_CUDA = TensorOptions{ .kind = Kind.Int64, .device = Device.Cuda(0) };
+pub const INT64_CUDA = TensorOptions{ .kind = Kind.Int64, .device = .{ .Cuda = 0 } };
 
 pub const global_allocator: std.mem.Allocator = std.heap.raw_c_allocator;
 
@@ -76,7 +76,7 @@ pub const Cuda = enum {
     }
 
     pub fn isAvailable() bool {
-        return c.atc_cuda_is_available();
+        return c.atc_cuda_is_available() != 0;
     }
 
     pub fn cudnn_is_available() bool {

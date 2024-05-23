@@ -1,6 +1,28 @@
 const std = @import("std");
 
+fn findLibtorchLibrary(b: *std.Build, path: []const u8, lib: []const u8) ?[]const u8 {
+    var dir = std.fs.openDirAbsolute(path, .{ .iterate = true }) catch return null;
+    var iterator = dir.iterate();
+    while (iterator.next() catch return null) |entry| {
+        const lib_name = std.fmt.allocPrint(b.allocator, "lib{s}.so", .{lib}) catch return null;
+        defer b.allocator.free(lib_name);
+        if (std.mem.eql(u8, entry.name, lib_name)) {
+            return std.fmt.allocPrint(b.allocator, "{s}/{s}", .{ path, entry.name }) catch return null;
+        }
+    }
+    iterator = dir.iterate();
+    while (iterator.next() catch return null) |entry| {
+        const lib_name = std.fmt.allocPrint(b.allocator, "lib{s}", .{lib}) catch return null;
+        defer b.allocator.free(lib_name);
+        if (std.mem.startsWith(u8, entry.name, lib_name)) {
+            return std.fmt.allocPrint(b.allocator, "{s}/{s}", .{ path, entry.name }) catch return null;
+        }
+    }
+    return null;
+}
+
 pub fn build(b: *std.Build) void {
+    const LIBTORCH_LIB = "/home/sreeraj/libtorch/lib";
     const target = b.standardTargetOptions(.{});
 
     const optimize = b.standardOptimizeOption(.{});
@@ -13,12 +35,13 @@ pub fn build(b: *std.Build) void {
     });
     exe.addObjectFile(b.path("libtch/libtch.a"));
     exe.addIncludePath(b.path("libtch/"));
-    exe.addLibraryPath(.{ .path = "/home/sreeraj/libtorch/lib" });
-    // exe.linkLibC();
-    // exe.linkLibCpp();
+    exe.addLibraryPath(.{ .path = LIBTORCH_LIB });
+    exe.linkLibC();
+    exe.linkLibCpp();
     exe.linkSystemLibrary("pthread");
     exe.linkSystemLibrary("m");
     exe.linkSystemLibrary("dl");
+    exe.linkSystemLibrary("rt");
 
     exe.addObjectFile(.{
         .path = "/usr/lib/x86_64-linux-gnu/libstdc++.so.6",
@@ -36,11 +59,32 @@ pub fn build(b: *std.Build) void {
         .path = "/usr/include/x86_64-linux-gnu/c++/11",
     });
 
-    exe.linkSystemLibrary("c10");
-    exe.linkSystemLibrary("torch");
-    exe.linkSystemLibrary("torch_cpu");
-    exe.linkSystemLibrary("torch_global_deps");
-    exe.linkSystemLibrary("torch_python");
+    const torch_libs = [_][]const u8{
+        "c10",
+        "torch",
+        "torch_cpu",
+        "torch_global_deps",
+        // "torch_python",
+        "gomp",
+        "c10_cuda",
+        "torch_cuda",
+        "nvToolsExt",
+        "cublas",
+        "cudart",
+        "cudnn.so",
+        "cublasLt",
+        "caffe2",
+    };
+
+    for (torch_libs) |lib| {
+        const lib_path = findLibtorchLibrary(b, LIBTORCH_LIB, lib) orelse {
+            std.log.err("Could not find libtorch library: {s}", .{lib});
+            return;
+        };
+        exe.addObjectFile(.{
+            .path = lib_path,
+        });
+    }
 
     b.installArtifact(exe);
 
@@ -54,15 +98,6 @@ pub fn build(b: *std.Build) void {
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
-
-    const lib_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
-
     const exe_unit_tests = b.addTest(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -72,6 +107,5 @@ pub fn build(b: *std.Build) void {
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
 }
