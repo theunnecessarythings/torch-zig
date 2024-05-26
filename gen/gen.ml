@@ -328,6 +328,9 @@ module Func = struct
       ; "data", "data_"
       ; "range", "range_"
       ; "inverse", "inverse_"
+      ; "numel", "numel_"
+      ; "copy", "copy_"
+      ; "options", "options_"
       ; "adjoint", "adjoint_"
       ; "sign", "sign_"
       ; "threshold", "threshold_"
@@ -613,14 +616,14 @@ module Func = struct
           | LayoutOption -> "?Layout"
           | Int64 -> "i64"
           | Double -> "f64"
-          | Tensor -> "*Tensor"
-          | TensorOption -> "?*Tensor"
+          | Tensor -> "*const Tensor"
+          | TensorOption -> "?*const Tensor"
           | IntList -> "[]i64"
           | IntListOption -> "?[]i64"
           | DoubleList -> "[]f64"
-          | TensorOptList -> "[]?*Tensor"
-          | TensorList -> "[]*Tensor"
-          | String -> "[]u8"
+          | TensorOptList -> "[]?*const Tensor"
+          | TensorList -> "[]*const Tensor"
+          | String -> "[]const u8"
           | TensorOptions -> "TensorOptions"
           | Int64Option -> "?i64"
           | DoubleOption -> "?f64"
@@ -1041,13 +1044,13 @@ let write_zig_wrapper funcs filename =
           exported_name
           (Func.zig_binding_args func ~self);
         (* pm "        var r__: []*Tensor = &[_]*Tensor{};"; *)
-        pm "        var r__ = std.ArrayList(Tensor).init(_global_allocator);";
-        pm "        var i: usize = 0;";
+        pm "        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);";
+        pm "        var idx: usize = 0;";
         pm "        while (true) {";
-        pm "            const c__ = c_tensors[i];";
+        pm "            const c__ = c_tensors[idx];";
         pm "            if (c__ == null) break;";
         pm "            r__.append(Tensor{ .c_tensor = c__ });";
-        pm "            i += 1;";
+        pm "            idx += 1;";
         pm "        }";
         pm "        return r__;";
         pm "    }"

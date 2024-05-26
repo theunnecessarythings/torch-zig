@@ -8,7 +8,7 @@ const c = @cImport({
 });
 // TODO: we don't have the error generating/fallible functions right now, probably need
 // // to add them for usecases where fallback is needed instead of panic
-const Tensor = @import("tensor.zig").Tensor;
+pub const Tensor = @import("tensor.zig").Tensor;
 
 // TODO: Do we name the stuff here proper, or follow tch-rs and its conventions?
 
@@ -19,11 +19,80 @@ pub const DOUBLE_CUDA = TensorOptions{ .kind = Kind.Double, .device = .{ .Cuda =
 pub const INT64_CPU = TensorOptions{ .kind = Kind.Int64, .device = Device.Cpu };
 pub const INT64_CUDA = TensorOptions{ .kind = Kind.Int64, .device = .{ .Cuda = 0 } };
 
-pub const global_allocator: std.mem.Allocator = std.heap.raw_c_allocator;
+pub var global_allocator: std.mem.Allocator = std.heap.raw_c_allocator;
 
 pub fn setGlobalAllocator(allocator: std.mem.Allocator) void {
     global_allocator = allocator;
 }
+
+pub const TensorPool = struct {
+    pool: std.StringArrayHashMap(std.ArrayList(Tensor)),
+
+    pub fn init() TensorPool {
+        var pool = std.StringArrayHashMap(std.ArrayList(Tensor)).init(global_allocator);
+        pool.put("default", std.ArrayList(Tensor).init(global_allocator)) catch unreachable;
+        return TensorPool{ .pool = pool };
+    }
+
+    pub fn addPool(self: *TensorPool, name: []const u8) void {
+        self.pool.put(name, std.ArrayList(Tensor).init(global_allocator)) catch unreachable;
+    }
+
+    pub fn removePool(self: *TensorPool, name: []const u8) void {
+        self.pool.swapRemove(name) catch {
+            std.log.err("Failed to remove pool: {}\n", .{name});
+            unreachable;
+        };
+    }
+
+    pub fn freePool(self: *TensorPool, name: []const u8) void {
+        var pool = self.pool.get(name) orelse {
+            std.log.err("Failed to get pool: {}\n", .{name});
+            unreachable;
+        };
+        for (pool.items) |tensor| {
+            tensor.free();
+        }
+        pool.clearAndFree();
+    }
+
+    pub fn freeAll(self: *TensorPool) void {
+        for (self.pool.values()) |pool| {
+            for (pool.items) |tensor| {
+                tensor.free();
+            }
+            pool.clearAndFree();
+        }
+    }
+
+    pub fn deinit(self: *TensorPool) void {
+        self.freeAll();
+        self.pool.deinit();
+    }
+
+    pub fn putToPool(self: *TensorPool, name: []const u8, tensor: Tensor) void {
+        var pool = self.pool.get(name) orelse {
+            // Pool does not exist, create it
+            std.log.err("Pool does not exist, creating it: {}\n", .{name});
+            self.addPool(name);
+        };
+        pool.append(tensor) catch {
+            std.log.err("Failed to append tensor to pool: {}\n", .{name});
+            unreachable;
+        };
+    }
+
+    pub fn put(self: *TensorPool, tensor: Tensor) void {
+        var pool = self.pool.get("default") orelse {
+            std.log.err("Failed to get default pool\n");
+            unreachable;
+        };
+        pool.append(tensor) catch {
+            std.log.err("Failed to append tensor to default pool\n");
+            unreachable;
+        };
+    }
+};
 
 pub const Device = union(enum) {
     Cuda: usize,
@@ -40,16 +109,16 @@ pub const Device = union(enum) {
         };
     }
 
-    pub fn fromCInt(v: c_int) !Device {
+    pub fn fromCInt(v: c_int) Device {
         return switch (v) {
             -1 => Device.Cpu,
             -2 => Device.Mps,
             -3 => Device.Vulkan,
-            _ => if (v >= 0) {
+            else => if (v >= 0) {
                 Device.Cuda(@intCast(v));
             } else {
                 std.debug.err("Invalid device index: {}\n", .{v});
-                return error.InvalidDeviceIndex;
+                unreachable;
             },
         };
     }
@@ -65,7 +134,7 @@ pub const Device = union(enum) {
     pub fn isCuda(self: Device) bool {
         return switch (self) {
             .Cuda => true,
-            _ => false,
+            else => false,
         };
     }
 };
@@ -147,7 +216,7 @@ pub const Kind = enum {
         };
     }
 
-    pub fn fromCInt(v: c_int) !Kind {
+    pub fn fromCInt(v: c_int) Kind {
         return switch (v) {
             0 => Kind.UInt8,
             1 => Kind.Int8,
@@ -165,9 +234,9 @@ pub const Kind = enum {
             13 => Kind.QUInt8,
             14 => Kind.QInt32,
             15 => Kind.BFloat16,
-            _ => {
-                std.debug.err("Invalid kind: {}\n", .{v});
-                return error.InvalidKind;
+            else => {
+                std.log.err("Invalid kind: {}\n", .{v});
+                unreachable;
             },
         };
     }
@@ -194,9 +263,32 @@ pub const Kind = enum {
     }
 };
 
+pub fn elementKind(comptime T: type) Kind {
+    return switch (T) {
+        u8 => Kind.UInt8,
+        i8 => Kind.Int8,
+        i16 => Kind.Int16,
+        i32 => Kind.Int,
+        i64 => Kind.Int64,
+        f16 => Kind.Half,
+        f32 => Kind.Float,
+        f64 => Kind.Double,
+        bool => Kind.Bool,
+        else => unreachable,
+    };
+}
+
 pub const TensorOptions = struct {
     kind: Kind,
     device: Device,
+
+    pub fn dtype(self: *const TensorOptions, kind: Kind) TensorOptions {
+        return TensorOptions{ .kind = kind, .device = self.device };
+    }
+
+    pub fn device(self: *const TensorOptions, device_: Device) TensorOptions {
+        return TensorOptions{ .kind = self.kind, .device = device_ };
+    }
 };
 
 pub const Layout = enum {
@@ -540,3 +632,37 @@ pub const COptimizer = struct {
         readAndCleanError();
     }
 };
+
+pub fn gradSetEnabled(enabled: bool) bool {
+    const ret = c.at_grad_set_enabled(enabled);
+    readAndCleanError();
+    return ret != 0;
+}
+
+pub fn autocastClearCache() void {
+    c.at_autocast_clear_cache();
+    readAndCleanError();
+}
+
+pub fn autocastDecrementNesting() isize {
+    const ret = c.at_autocast_decrement_nesting();
+    readAndCleanError();
+    return ret;
+}
+
+pub fn autocastIncrementNesting() isize {
+    const ret = c.at_autocast_increment_nesting();
+    readAndCleanError();
+    return ret;
+}
+
+pub fn autocastIsEnabled() bool {
+    const ret = c.at_autocast_is_enabled();
+    readAndCleanError();
+    return ret != 0;
+}
+
+pub fn autocastSetEnabled(b: bool) void {
+    c.at_autocast_set_enabled(b);
+    readAndCleanError();
+}

@@ -27,35 +27,35 @@ pub fn build(b: *std.Build) void {
 
     const optimize = b.standardOptimizeOption(.{});
 
-    const exe = b.addExecutable(.{
-        .name = "torch-zig",
-        .root_source_file = b.path("src/main.zig"),
+    const torch_module = b.addModule("torch", .{
+        // .name = "torch",
+        .root_source_file = b.path("src/torch.zig"),
         .target = target,
         .optimize = optimize,
     });
-    exe.addObjectFile(b.path("libtch/libtch.a"));
-    exe.addIncludePath(b.path("libtch/"));
-    exe.addLibraryPath(.{ .path = LIBTORCH_LIB });
-    exe.linkLibC();
-    exe.linkLibCpp();
-    exe.linkSystemLibrary("pthread");
-    exe.linkSystemLibrary("m");
-    exe.linkSystemLibrary("dl");
-    exe.linkSystemLibrary("rt");
+    torch_module.addObjectFile(b.path("libtch/libtch.a"));
+    torch_module.addIncludePath(b.path("libtch/"));
+    torch_module.addLibraryPath(.{ .path = LIBTORCH_LIB });
+    // exe.linkLibC();
+    // exe.linkLibCpp();
+    torch_module.linkSystemLibrary("pthread", .{});
+    torch_module.linkSystemLibrary("m", .{});
+    torch_module.linkSystemLibrary("dl", .{});
+    torch_module.linkSystemLibrary("rt", .{});
 
-    exe.addObjectFile(.{
+    torch_module.addObjectFile(.{
         .path = "/usr/lib/x86_64-linux-gnu/libstdc++.so.6",
     });
-    exe.addObjectFile(.{
+    torch_module.addObjectFile(.{
         .path = "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
     });
-    exe.addIncludePath(.{
+    torch_module.addIncludePath(.{
         .path = "/usr/lib/gcc/x86_64-linux-gnu/11/include",
     });
-    exe.addIncludePath(.{
+    torch_module.addIncludePath(.{
         .path = "/usr/include/c++/11",
     });
-    exe.addIncludePath(.{
+    torch_module.addIncludePath(.{
         .path = "/usr/include/x86_64-linux-gnu/c++/11",
     });
 
@@ -81,10 +81,21 @@ pub fn build(b: *std.Build) void {
             std.log.err("Could not find libtorch library: {s}", .{lib});
             return;
         };
-        exe.addObjectFile(.{
+        torch_module.addObjectFile(.{
             .path = lib_path,
         });
     }
+
+    const exe = b.addExecutable(.{
+        .name = "torch_test",
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    exe.linkLibC();
+    exe.addIncludePath(b.path("libtch/"));
+    exe.root_module.addImport("torch", torch_module);
 
     b.installArtifact(exe);
 
@@ -103,6 +114,9 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    exe_unit_tests.linkLibC();
+    exe_unit_tests.addIncludePath(b.path("libtch/"));
+    exe_unit_tests.root_module.addImport("torch", torch_module);
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 

@@ -14,16 +14,43 @@ const Kind = torch.Kind;
 const Scalar = torch.Scalar;
 const Layout = torch.Layout;
 const C_tensor = __c.tensor;
-const _global_allocator = torch.global_allocator;
+
+pub const Reduction = enum {
+    None,
+    Mean,
+    Sum,
+
+    pub fn toInt(self: Reduction) i64 {
+        return switch (self) {
+            .None => 0,
+            .Mean => 1,
+            .Sum => 2,
+        };
+    }
+};
 
 fn ptrList(l: []?Tensor) []*C_tensor {
-    _ = l;
-    // l.iter().map(|x| x.as_ref().map_or(std::ptr::null_mut(), |x| \
-    // x.borrow().c_tensor)).collect()";
+    var ret = std.ArrayList(*C_tensor).init(torch.global_allocator);
+    for (l) |x| {
+        ret.append(x.c_tensor);
+    }
+    return ret.toOwnedSlice();
 }
 fn ptrListOpt(l: []Tensor) []*C_tensor {
-    _ = l;
+    return ptrList(l);
 }
+
+pub const TensorIndexer = union(enum) {
+    Select: i64,
+    Narrow: struct {
+        start: ?i64,
+        end: ?i64,
+    },
+    IndexSelect: *const Tensor,
+    InsertNewAxis: void,
+};
+
+pub const NewAxis = struct {};
 
 pub const Tensor = struct {
     c_tensor: C_tensor,
@@ -31,6 +58,104 @@ pub const Tensor = struct {
         const ret = __c.at_new_tensor();
         torch.readAndCleanError();
         return Tensor{ .c_tensor = ret };
+    }
+    // TODO: implement this for formatted printing, for now we can just use the default print
+    // pub fn format(self: Tensor, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype,) !void {
+    // }
+
+    pub fn i(self: *const Tensor, index_spec: anytype) Tensor {
+        // TODO: add case for just a single int index
+        var specs = std.ArrayList(TensorIndexer).init(torch.global_allocator);
+        defer specs.deinit();
+        inline for (index_spec) |spec| {
+            const spec_ = switch (@TypeOf(spec)) {
+                NewAxis => TensorIndexer.InsertNewAxis,
+                i64, comptime_int => TensorIndexer{ .Select = spec },
+                struct { start: ?i64, end: ?i64 } => TensorIndexer{ .Narrow = spec },
+                []i64 => blk_i64: {
+                    const index_tensor = Tensor.fromSlice(i64, spec);
+                    break :blk_i64 TensorIndexer{ .IndexSelect = index_tensor };
+                },
+                Tensor => TensorIndexer{ .IndexSelect = spec.shallowClone() },
+                else => {
+                    std.log.err("unsupported index spec type: {any}", .{@TypeOf(spec)});
+                    unreachable;
+                },
+            };
+            specs.append(spec_) catch unreachable;
+        }
+        return self.indexer(specs.items);
+    }
+
+    fn indexer(self: *const Tensor, index_spec: []TensorIndexer) Tensor {
+        var n_newaxis: usize = 0;
+        for (index_spec) |spec| {
+            if (spec == TensorIndexer.InsertNewAxis) {
+                n_newaxis += 1;
+            }
+        }
+
+        if (index_spec.len > self.size().len + n_newaxis) {
+            std.log.err("too many indices for tensor of dimension {d}", .{self.size().len});
+            unreachable;
+        }
+
+        for (index_spec) |spec| {
+            switch (spec) {
+                .IndexSelect => |tensor| {
+                    if (tensor.size().len != 1) {
+                        std.log.err("expected 1-d tensor, got {}", .{tensor.size().len});
+                        unreachable;
+                    }
+
+                    switch (tensor.kind()) {
+                        .Int64, .Int16, .Int8, .Int => {},
+                        else => {
+                            std.log.err("expected int tensor for indices, got {}", .{tensor.kind()});
+                            unreachable;
+                        },
+                    }
+                },
+                else => {},
+            }
+        }
+
+        var curr_tensor = self.shallowClone();
+        var curr_idx: usize = 0;
+
+        for (index_spec) |spec| {
+            switch (spec) {
+                TensorIndexer.InsertNewAxis => {
+                    curr_tensor = curr_tensor.unsqueeze(@intCast(curr_idx));
+                    curr_idx += 1;
+                },
+                TensorIndexer.Select => |idx| {
+                    curr_tensor = curr_tensor.select(@intCast(curr_idx), @intCast(idx));
+                },
+                TensorIndexer.Narrow => |narrow_| {
+                    const size_ = self.size();
+                    const start = narrow_.start orelse 0;
+                    const end = narrow_.end orelse size_[curr_idx];
+                    if (start < 0 or end < start or end > size_[curr_idx]) {
+                        std.log.err("invalid start/end for narrow: start={}, end={}, shape={}", .{ start, end, size_[curr_idx] });
+                        unreachable;
+                    }
+                    const length = end - start;
+                    curr_tensor = curr_tensor.narrow(@intCast(curr_idx), start, length);
+                    curr_idx += 1;
+                },
+                TensorIndexer.IndexSelect => |index_tensor| {
+                    curr_tensor = curr_tensor.indexSelect(@intCast(curr_idx), index_tensor);
+                    curr_idx += 1;
+                },
+            }
+        }
+
+        return curr_tensor;
+    }
+
+    pub fn options(self: *const Tensor) TensorOptions {
+        return TensorOptions{ .kind = self.kind(), .device = self.device() };
     }
 
     pub fn fromPtr(c_tensor: C_tensor) Tensor {
@@ -43,27 +168,29 @@ pub const Tensor = struct {
         return Tensor{ .c_tensor = tensor };
     }
 
-    pub fn asPtr(self: Tensor) C_tensor {
+    pub fn asPtr(self: *const Tensor) C_tensor {
         return self.c_tensor;
     }
 
-    pub fn dim(self: *Tensor) usize {
+    pub fn dim(self: *const Tensor) usize {
         const ret = __c.at_dim(self.c_tensor);
         torch.readAndCleanError();
         return ret;
     }
 
-    pub fn size(self: *Tensor) ![]i64 {
+    pub fn size(self: *const Tensor) []i64 {
         const dim_ = __c.at_dim(self.c_tensor);
         torch.readAndCleanError();
-        var sz = std.ArrayList(i64).init(_global_allocator);
-        try sz.resize(dim_);
-        __c.at_shape(self.c_tensor, sz.items);
+        var sz = std.ArrayList(i64).init(torch.global_allocator);
+        sz.resize(dim_) catch unreachable;
+        const items = torch.global_allocator.dupeZ(i64, sz.items) catch unreachable;
+        defer torch.global_allocator.free(items);
+        __c.at_shape(self.c_tensor, items);
         torch.readAndCleanError();
-        return sz.toOwnedSlice();
+        return sz.toOwnedSlice() catch unreachable;
     }
 
-    pub fn sizeDims(comptime dims: usize, self: *Tensor) ![dims]i64 {
+    pub fn sizeDims(self: *const Tensor, comptime dims: usize) ![dims]i64 {
         const size_ = self.size();
         if (size_.len != dims) {
             std.log.err("expected {} dims, got {}", .{ dims, size_.len });
@@ -72,16 +199,16 @@ pub const Tensor = struct {
         return size_[0..dims];
     }
 
-    pub fn stride(self: *Tensor) ![]i64 {
+    pub fn stride(self: *const Tensor) ![]i64 {
         const dim_ = self.dim();
-        var sz = std.ArrayList(i64).init(_global_allocator);
+        var sz = std.ArrayList(i64).init(torch.global_allocator);
         try sz.resize(dim_);
         __c.at_stride(self.c_tensor, sz.items);
         torch.readAndCleanError();
         return sz.toOwnedSlice();
     }
 
-    pub fn strideDims(comptime dims: usize, self: *Tensor) ![dims]i64 {
+    pub fn strideDims(self: *const Tensor, comptime dims: usize) ![dims]i64 {
         const stride_ = self.stride();
         if (stride_.len != dims) {
             std.log.err("expected one dim, got {}", .{stride_.len});
@@ -90,36 +217,36 @@ pub const Tensor = struct {
         return stride_[0..dims];
     }
 
-    pub fn kind(self: *Tensor) Kind {
+    pub fn kind(self: *const Tensor) Kind {
         const kind_ = __c.at_scalar_type(self.c_tensor);
         torch.readAndCleanError();
         return Kind.fromCInt(kind_);
     }
 
-    pub fn device(self: *Tensor) Device {
+    pub fn device(self: *const Tensor) Device {
         const device_ = __c.at_device(self.c_tensor);
         torch.readAndCleanError();
         return Device.fromCInt(device_);
     }
 
-    pub fn print(self: *Tensor) void {
+    pub fn print(self: *const Tensor) void {
         __c.at_print(self.c_tensor);
         torch.readAndCleanError();
     }
 
-    pub fn doubleValue(self: *Tensor, idx: []i64) f64 {
+    pub fn doubleValue(self: *const Tensor, idx: []i64) f64 {
         const ret = __c.at_double_value_at_indexes(self.c_tensor, idx.items, idx.len);
         torch.readAndCleanError();
         return ret;
     }
 
-    pub fn int64Value(self: *Tensor, idx: []i64) i64 {
+    pub fn int64Value(self: *const Tensor, idx: []i64) i64 {
         const ret = __c.at_int64_value_at_indexes(self.c_tensor, idx.items, idx.len);
         torch.readAndCleanError();
         return ret;
     }
 
-    pub fn requiresGrad(self: *Tensor) bool {
+    pub fn requiresGrad(self: *const Tensor) bool {
         const ret = __c.at_requires_grad(self.c_tensor);
         torch.readAndCleanError();
         return ret;
@@ -131,25 +258,25 @@ pub const Tensor = struct {
     //     return ret;
     // }
 
-    pub fn defined(self: *Tensor) bool {
+    pub fn defined(self: *const Tensor) bool {
         const ret = __c.at_defined(self.c_tensor);
         torch.readAndCleanError();
-        return ret;
+        return if (ret != 0) true else false;
     }
 
-    pub fn isMkldnn(self: *Tensor) bool {
+    pub fn isMkldnn(self: *const Tensor) bool {
         const ret = __c.at_is_mkldnn(self.c_tensor);
         torch.readAndCleanError();
         return ret;
     }
 
-    pub fn isSparse(self: *Tensor) bool {
+    pub fn isSparse(self: *const Tensor) bool {
         const ret = __c.at_is_sparse(self.c_tensor);
         torch.readAndCleanError();
         return ret;
     }
 
-    pub fn isContiguous(self: *Tensor) bool {
+    pub fn isContiguous(self: *const Tensor) bool {
         const ret = __c.at_is_contiguous(self.c_tensor);
         torch.readAndCleanError();
         return ret;
@@ -162,9 +289,118 @@ pub const Tensor = struct {
         }
     }
 
+    pub fn backward(self: *Tensor) void {
+        __c.at_backward(self.c_tensor, 0, 0);
+        torch.readAndCleanError();
+    }
+
+    pub fn runBackward(tensors: []Tensor, inputs: []Tensor, keep_graph: bool, create_graph: bool) !std.ArrayList(Tensor) {
+        var outputs = std.ArrayList(C_tensor).init(torch.global_allocator);
+        defer outputs.deinit();
+        try outputs.resize(inputs.len);
+        var inputs_ = ptrList(inputs);
+        var tensors_ = ptrList(tensors);
+
+        __c.at_run_backward(&tensors_, @intCast(tensors_.len), &inputs_, @intCast(inputs_.len), outputs.items, keep_graph, create_graph);
+        torch.readAndCleanError();
+        var res = std.ArrayList(Tensor).init(torch.global_allocator);
+        for (outputs.items) |output| {
+            res.append(Tensor{ .c_tensor = output });
+        }
+        return res;
+    }
+
+    pub fn copyDataU8(self: *Tensor, dst: []u8, numel_: usize) !void {
+        const elt_size_in_bytes = self.kind().eltSizeInBytes();
+        if (dst.len < numel_ * elt_size_in_bytes) {
+            std.log.err("expected buffer of size {}, got {}", .{ numel_ * elt_size_in_bytes, dst.len });
+            return error.BufferTooSmall;
+        }
+        __c.at_copy_data(self.c_tensor, dst.ptr, numel_, elt_size_in_bytes);
+        torch.readAndCleanError();
+    }
+
+    pub fn internalAmpNonFiniteCheckAndUnscale(self: *Tensor, found_inf: *Tensor, inv_scale: *const Tensor) void {
+        __c.at__amp_non_finite_check_and_unscale(self.c_tensor, found_inf.c_tensor, inv_scale.c_tensor);
+        torch.readAndCleanError();
+    }
+
+    pub fn copyData(self: *const Tensor, dst: []*Tensor, numel_: usize) !void {
+        // TODO: Fix this function
+        if (self.kind() != dst.kind()) {
+            std.log.err("expected same kind, got {any} and {any}", .{ self.kind(), dst.kind() });
+            return error.UnexpectedKind;
+        }
+
+        if (dst.len < numel_) {
+            std.log.err("expected buffer of size {}, got {}", .{ numel_, dst.len });
+            return error.BufferTooSmall;
+        }
+
+        __c.at_copy_data(self.c_tensor, dst.c_tensor, numel_);
+        torch.readAndCleanError();
+    }
+
+    pub fn numel(self: *const Tensor) usize {
+        const size_ = self.size();
+        var ret: usize = 1;
+        for (size_) |s| {
+            ret *= @intCast(s);
+        }
+        return ret;
+    }
+
+    pub fn fromSlice(comptime T: type, data_: []T) Tensor {
+        var size_ = [_]i64{@intCast(data_.len)};
+        const kind_ = torch.elementKind(T);
+        const c_tensor = __c.at_tensor_of_data(data_.ptr, &size_, 1, kind_.eltSizeInBytes(), kind_.cInt());
+        torch.readAndCleanError();
+        return Tensor{ .c_tensor = c_tensor };
+    }
+
     pub fn free(self: *Tensor) void {
         __c.at_free(self.c_tensor);
         torch.readAndCleanError();
+    }
+
+    // TODO: finish rest of the functions
+
+    pub fn shallowClone(self: *const Tensor) Tensor {
+        const c_tensor = __c.at_shallow_clone(self.c_tensor);
+        torch.readAndCleanError();
+        return Tensor{ .c_tensor = c_tensor };
+    }
+
+    pub fn get(self: *const Tensor, idx: i64) Tensor {
+        const c_tensor = __c.at_get(self.c_tensor, idx);
+        torch.readAndCleanError();
+        return Tensor{ .c_tensor = c_tensor };
+    }
+
+    pub fn copy(self: *const Tensor, src: *const Tensor) void {
+        _ = __c.at_copy_(self.c_tensor, src.c_tensor);
+        torch.readAndCleanError();
+    }
+
+    pub fn load(path: []const u8) Tensor {
+        const c_path = torch.global_allocator.dupeZ(path);
+        defer torch.global_allocator.free(c_path);
+        const c_tensor = __c.at_load(c_path);
+        torch.readAndCleanError();
+        return Tensor{ .c_tensor = c_tensor };
+    }
+
+    pub fn save(self: *const Tensor, path: []const u8) void {
+        const c_path = torch.global_allocator.dupeZ(path);
+        defer torch.global_allocator.free(c_path);
+        __c.at_save(self.c_tensor, c_path);
+        torch.readAndCleanError();
+    }
+
+    pub fn toString(self: *const Tensor, lw: i64) []const u8 {
+        const s = __c.at_to_string(self.c_tensor, @intCast(lw));
+        torch.readAndCleanError();
+        return s;
     }
 
     // Generated code starts here
@@ -180,7 +416,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAndTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___and__tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -200,7 +436,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalIandTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___iand__tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -220,7 +456,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalIlshiftTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___ilshift__tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -240,7 +476,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalIorTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___ior__tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -260,7 +496,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalIrshiftTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___irshift__tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -280,7 +516,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalIxorTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___ixor__tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -300,7 +536,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLshiftScalarOut_(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___lshift__scalar_out_(@ptrCast(&c_tensors), out.c_tensor,
@@ -311,7 +547,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLshiftTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___lshift__tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -321,7 +557,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLshiftTensorOut_(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___lshift__tensor_out_(@ptrCast(&c_tensors), out.c_tensor,
@@ -342,7 +578,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalOrTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___or__tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -362,7 +598,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalRshiftScalarOut_(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___rshift__scalar_out_(@ptrCast(&c_tensors), out.c_tensor,
@@ -373,7 +609,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalRshiftTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___rshift__tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -383,7 +619,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalRshiftTensorOut_(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___rshift__tensor_out_(@ptrCast(&c_tensors), out.c_tensor,
@@ -404,7 +640,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalXorTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___xor__tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -424,7 +660,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAdaptiveAvgPool2dBackward(
-        self: *const Tensor, grad_output: *Tensor
+        self: *const Tensor, grad_output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__adaptive_avg_pool2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -434,7 +670,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAdaptiveAvgPool2dBackwardOut(
-        self: *const Tensor, out: *Tensor, grad_output: *Tensor
+        self: *const Tensor, out: *const Tensor, grad_output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__adaptive_avg_pool2d_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -445,7 +681,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAdaptiveAvgPool2dOut(
-        self: *const Tensor, out: *Tensor, output_size: []i64
+        self: *const Tensor, out: *const Tensor, output_size: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__adaptive_avg_pool2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -466,7 +702,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAdaptiveAvgPool3dBackward(
-        self: *const Tensor, grad_output: *Tensor
+        self: *const Tensor, grad_output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__adaptive_avg_pool3d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -476,7 +712,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAdaptiveAvgPool3dBackwardOut(
-        self: *const Tensor, out: *Tensor, grad_output: *Tensor
+        self: *const Tensor, out: *const Tensor, grad_output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__adaptive_avg_pool3d_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -487,7 +723,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAdaptiveAvgPool3dOut(
-        self: *const Tensor, out: *Tensor, output_size: []i64
+        self: *const Tensor, out: *const Tensor, output_size: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__adaptive_avg_pool3d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -509,7 +745,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAddRelu(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__add_relu(@ptrCast(&c_tensors), self.c_tensor,
@@ -519,7 +755,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAddRelu_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__add_relu_(@ptrCast(&c_tensors), self.c_tensor,
@@ -529,7 +765,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAddReluOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__add_relu_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -560,7 +796,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAddReluScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__add_relu_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -571,7 +807,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAddmmActivation(
-        self: *const Tensor, mat1: *Tensor, mat2: *Tensor, use_gelu: bool
+        self: *const Tensor, mat1: *const Tensor, mat2: *const Tensor, use_gelu: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__addmm_activation(@ptrCast(&c_tensors), self.c_tensor,
@@ -583,7 +819,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAddmmActivationOut(
-        self: *const Tensor, out: *Tensor, mat1: *Tensor, mat2: *Tensor, use_gelu: bool
+        self: *const Tensor, out: *const Tensor, mat1: *const Tensor, mat2: *const Tensor, use_gelu: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__addmm_activation_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -616,7 +852,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAminmaxDimOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, dim_: i64, keepdim: bool
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, dim_: i64, keepdim: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__aminmax_dim_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -629,7 +865,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAminmaxOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__aminmax_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -640,7 +876,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAmpUpdateScale(
-        self: *const Tensor, growth_tracker: *Tensor, found_inf: *Tensor, scale_growth_factor: f64, scale_backoff_factor: f64, growth_interval: i64
+        self: *const Tensor, growth_tracker: *const Tensor, found_inf: *const Tensor, scale_growth_factor: f64, scale_backoff_factor: f64, growth_interval: i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__amp_update_scale(@ptrCast(&c_tensors), self.c_tensor,
@@ -654,7 +890,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAmpUpdateScale_(
-        self: *Tensor, growth_tracker: *Tensor, found_inf: *Tensor, scale_growth_factor: f64, scale_backoff_factor: f64, growth_interval: i64
+        self: *Tensor, growth_tracker: *const Tensor, found_inf: *const Tensor, scale_growth_factor: f64, scale_backoff_factor: f64, growth_interval: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__amp_update_scale_(@ptrCast(&c_tensors), self.c_tensor,
@@ -668,7 +904,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAmpUpdateScaleOut(
-        self: *const Tensor, out: *Tensor, growth_tracker: *Tensor, found_inf: *Tensor, scale_growth_factor: f64, scale_backoff_factor: f64, growth_interval: i64
+        self: *const Tensor, out: *const Tensor, growth_tracker: *const Tensor, found_inf: *const Tensor, scale_growth_factor: f64, scale_backoff_factor: f64, growth_interval: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__amp_update_scale_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -683,7 +919,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAssertScalar(
-        self_scalar: Scalar, assert_msg: []u8
+        self_scalar: Scalar, assert_msg: []const u8
     ) void {
         __c.atg__assert_scalar(self_scalar.into().c_scalar,
                 assert_msg.ptr, assert_msg.len);
@@ -692,7 +928,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalAssertTensorMetadata(
-        a: *Tensor, size_: ?[]i64, stride_: ?[]i64, dtype: ?Kind
+        a: *const Tensor, size_: ?[]i64, stride_: ?[]i64, dtype: ?Kind
     ) void {
         __c.atg__assert_tensor_metadata(a.c_tensor,
                 size_.ptr, @intCast(size_.len),
@@ -807,7 +1043,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCdistBackward(
-        gradient: *Tensor, x1: *Tensor, x2: *Tensor, p: f64, cdist_: *Tensor
+        gradient: *const Tensor, x1: *const Tensor, x2: *const Tensor, p: f64, cdist_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__cdist_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -820,7 +1056,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCdistBackwardOut(
-        out: *Tensor, gradient: *Tensor, x1: *Tensor, x2: *Tensor, p: f64, cdist_: *Tensor
+        out: *const Tensor, gradient: *const Tensor, x1: *const Tensor, x2: *const Tensor, p: f64, cdist_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__cdist_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -834,7 +1070,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCholeskySolveHelper(
-        self: *const Tensor, a: *Tensor, upper: bool
+        self: *const Tensor, a: *const Tensor, upper: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__cholesky_solve_helper(@ptrCast(&c_tensors), self.c_tensor,
@@ -845,7 +1081,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCholeskySolveHelperOut(
-        self: *const Tensor, out: *Tensor, a: *Tensor, upper: bool
+        self: *const Tensor, out: *const Tensor, a: *const Tensor, upper: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__cholesky_solve_helper_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -857,7 +1093,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalChunkCat(
-        tensors: []*Tensor, dim_: i64, num_chunks: i64
+        tensors: []*const Tensor, dim_: i64, num_chunks: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__chunk_cat(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len),
@@ -868,7 +1104,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalChunkCatOut(
-        out: *Tensor, tensors: []*Tensor, dim_: i64, num_chunks: i64
+        out: *const Tensor, tensors: []*const Tensor, dim_: i64, num_chunks: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__chunk_cat_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -889,7 +1125,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCoalesceOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__coalesce_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -919,7 +1155,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCoalescedOut(
-        self: *const Tensor, out: *Tensor, coalesced: bool
+        self: *const Tensor, out: *const Tensor, coalesced: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__coalesced_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -930,7 +1166,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalComputeLinearCombination(
-        self: *const Tensor, coefficients: *Tensor
+        self: *const Tensor, coefficients: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__compute_linear_combination(@ptrCast(&c_tensors), self.c_tensor,
@@ -940,7 +1176,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalComputeLinearCombinationOut(
-        self: *const Tensor, out: *Tensor, coefficients: *Tensor
+        self: *const Tensor, out: *const Tensor, coefficients: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__compute_linear_combination_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -969,7 +1205,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalConjCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__conj_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -988,7 +1224,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalConjPhysicalOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__conj_physical_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -998,7 +1234,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalConvDepthwise2d(
-        self: *const Tensor, weight: *Tensor, kernel_size: []i64, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64
+        self: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__conv_depthwise2d(@ptrCast(&c_tensors), self.c_tensor,
@@ -1013,7 +1249,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalConvDepthwise2dOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, kernel_size: []i64, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__conv_depthwise2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -1040,7 +1276,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalConvertIndicesFromCooToCsrOut(
-        self: *const Tensor, out: *Tensor, size_: i64, out_int32: bool
+        self: *const Tensor, out: *const Tensor, size_: i64, out_int32: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__convert_indices_from_coo_to_csr_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -1052,7 +1288,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalConvertIndicesFromCsrToCoo(
-        crow_indices_: *Tensor, col_indices_: *Tensor, out_int32: bool, transpose_: bool
+        crow_indices_: *const Tensor, col_indices_: *const Tensor, out_int32: bool, transpose_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__convert_indices_from_csr_to_coo(@ptrCast(&c_tensors), crow_indices_.c_tensor,
@@ -1064,7 +1300,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalConvertIndicesFromCsrToCooOut(
-        out: *Tensor, crow_indices_: *Tensor, col_indices_: *Tensor, out_int32: bool, transpose_: bool
+        out: *const Tensor, crow_indices_: *const Tensor, col_indices_: *const Tensor, out_int32: bool, transpose_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__convert_indices_from_csr_to_coo_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -1087,7 +1323,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalConvolution(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64, benchmark: bool, deterministic: bool, cudnn_enabled: bool, allow_tf32: bool
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64, benchmark: bool, deterministic: bool, cudnn_enabled: bool, allow_tf32: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__convolution(@ptrCast(&c_tensors), self.c_tensor,
@@ -1108,7 +1344,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalConvolutionDeprecated(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64, benchmark: bool, deterministic: bool, cudnn_enabled: bool
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64, benchmark: bool, deterministic: bool, cudnn_enabled: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__convolution_deprecated(@ptrCast(&c_tensors), self.c_tensor,
@@ -1128,7 +1364,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalConvolutionMode(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []u8, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []const u8, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__convolution_mode(@ptrCast(&c_tensors), self.c_tensor,
@@ -1143,7 +1379,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalConvolutionOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64, benchmark: bool, deterministic: bool, cudnn_enabled: bool, allow_tf32: bool
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64, benchmark: bool, deterministic: bool, cudnn_enabled: bool, allow_tf32: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__convolution_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -1165,7 +1401,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCopyFrom(
-        self: *const Tensor, dst: *Tensor, non_blocking: bool
+        self: *const Tensor, dst: *const Tensor, non_blocking: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__copy_from(@ptrCast(&c_tensors), self.c_tensor,
@@ -1176,7 +1412,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCopyFromAndResize(
-        self: *const Tensor, dst: *Tensor
+        self: *const Tensor, dst: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__copy_from_and_resize(@ptrCast(&c_tensors), self.c_tensor,
@@ -1186,7 +1422,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCopyFromAndResizeOut(
-        self: *const Tensor, out: *Tensor, dst: *Tensor
+        self: *const Tensor, out: *const Tensor, dst: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__copy_from_and_resize_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -1197,7 +1433,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCopyFromOut(
-        self: *const Tensor, out: *Tensor, dst: *Tensor, non_blocking: bool
+        self: *const Tensor, out: *const Tensor, dst: *const Tensor, non_blocking: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__copy_from_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -1218,7 +1454,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCsltSparseMm(
-        compressed_a: *Tensor, dense_b: *Tensor, bias: ?*Tensor, alpha: ?*Tensor, out_dtype: ?Kind, transpose_result: bool, alg_id: i64
+        compressed_a: *const Tensor, dense_b: *const Tensor, bias: ?*const Tensor, alpha: ?*const Tensor, out_dtype: ?Kind, transpose_result: bool, alg_id: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__cslt_sparse_mm(@ptrCast(&c_tensors), compressed_a.c_tensor,
@@ -1233,7 +1469,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCsltSparseMmSearch(
-        compressed_a: *Tensor, dense_b: *Tensor, bias: ?*Tensor, alpha: ?*Tensor, out_dtype: ?Kind, transpose_result: bool
+        compressed_a: *const Tensor, dense_b: *const Tensor, bias: ?*const Tensor, alpha: ?*const Tensor, out_dtype: ?Kind, transpose_result: bool
     ) i64 {
         const return_ = __c.atg__cslt_sparse_mm_search(compressed_a.c_tensor,
                 dense_b.c_tensor,
@@ -1246,7 +1482,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCtcLoss(
-        log_probs: *Tensor, targets: *Tensor, input_lengths: []i64, target_lengths: []i64, blank: i64, zero_infinity: bool
+        log_probs: *const Tensor, targets: *const Tensor, input_lengths: []i64, target_lengths: []i64, blank: i64, zero_infinity: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__ctc_loss(@ptrCast(&c_tensors), log_probs.c_tensor,
@@ -1260,7 +1496,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCtcLossBackward(
-        gradient: *Tensor, log_probs: *Tensor, targets: *Tensor, input_lengths: []i64, target_lengths: []i64, neg_log_likelihood: *Tensor, log_alpha: *Tensor, blank: i64, zero_infinity: bool
+        gradient: *const Tensor, log_probs: *const Tensor, targets: *const Tensor, input_lengths: []i64, target_lengths: []i64, neg_log_likelihood: *const Tensor, log_alpha: *const Tensor, blank: i64, zero_infinity: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__ctc_loss_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -1277,7 +1513,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCtcLossBackwardOut(
-        out: *Tensor, gradient: *Tensor, log_probs: *Tensor, targets: *Tensor, input_lengths: []i64, target_lengths: []i64, neg_log_likelihood: *Tensor, log_alpha: *Tensor, blank: i64, zero_infinity: bool
+        out: *const Tensor, gradient: *const Tensor, log_probs: *const Tensor, targets: *const Tensor, input_lengths: []i64, target_lengths: []i64, neg_log_likelihood: *const Tensor, log_alpha: *const Tensor, blank: i64, zero_infinity: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__ctc_loss_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -1295,7 +1531,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCtcLossBackwardTensor(
-        gradient: *Tensor, log_probs: *Tensor, targets: *Tensor, input_lengths: *Tensor, target_lengths: *Tensor, neg_log_likelihood: *Tensor, log_alpha: *Tensor, blank: i64, zero_infinity: bool
+        gradient: *const Tensor, log_probs: *const Tensor, targets: *const Tensor, input_lengths: *const Tensor, target_lengths: *const Tensor, neg_log_likelihood: *const Tensor, log_alpha: *const Tensor, blank: i64, zero_infinity: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__ctc_loss_backward_tensor(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -1312,7 +1548,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCtcLossOut(
-        out0: *Tensor, out1: *Tensor, log_probs: *Tensor, targets: *Tensor, input_lengths: []i64, target_lengths: []i64, blank: i64, zero_infinity: bool
+        out0: *const Tensor, out1: *const Tensor, log_probs: *const Tensor, targets: *const Tensor, input_lengths: []i64, target_lengths: []i64, blank: i64, zero_infinity: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__ctc_loss_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -1328,7 +1564,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCtcLossTensor(
-        log_probs: *Tensor, targets: *Tensor, input_lengths: *Tensor, target_lengths: *Tensor, blank: i64, zero_infinity: bool
+        log_probs: *const Tensor, targets: *const Tensor, input_lengths: *const Tensor, target_lengths: *const Tensor, blank: i64, zero_infinity: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__ctc_loss_tensor(@ptrCast(&c_tensors), log_probs.c_tensor,
@@ -1342,7 +1578,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCtcLossTensorOut(
-        out0: *Tensor, out1: *Tensor, log_probs: *Tensor, targets: *Tensor, input_lengths: *Tensor, target_lengths: *Tensor, blank: i64, zero_infinity: bool
+        out0: *const Tensor, out1: *const Tensor, log_probs: *const Tensor, targets: *const Tensor, input_lengths: *const Tensor, target_lengths: *const Tensor, blank: i64, zero_infinity: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__ctc_loss_tensor_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -1358,7 +1594,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCudnnCtcLoss(
-        log_probs: *Tensor, targets: *Tensor, input_lengths: []i64, target_lengths: []i64, blank: i64, deterministic: bool, zero_infinity: bool
+        log_probs: *const Tensor, targets: *const Tensor, input_lengths: []i64, target_lengths: []i64, blank: i64, deterministic: bool, zero_infinity: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__cudnn_ctc_loss(@ptrCast(&c_tensors), log_probs.c_tensor,
@@ -1373,7 +1609,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCudnnCtcLossOut(
-        out0: *Tensor, out1: *Tensor, log_probs: *Tensor, targets: *Tensor, input_lengths: []i64, target_lengths: []i64, blank: i64, deterministic: bool, zero_infinity: bool
+        out0: *const Tensor, out1: *const Tensor, log_probs: *const Tensor, targets: *const Tensor, input_lengths: []i64, target_lengths: []i64, blank: i64, deterministic: bool, zero_infinity: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__cudnn_ctc_loss_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -1390,7 +1626,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCudnnCtcLossTensor(
-        log_probs: *Tensor, targets: *Tensor, input_lengths: *Tensor, target_lengths: *Tensor, blank: i64, deterministic: bool, zero_infinity: bool
+        log_probs: *const Tensor, targets: *const Tensor, input_lengths: *const Tensor, target_lengths: *const Tensor, blank: i64, deterministic: bool, zero_infinity: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__cudnn_ctc_loss_tensor(@ptrCast(&c_tensors), log_probs.c_tensor,
@@ -1405,19 +1641,19 @@ pub const Tensor = struct {
     }
 
     pub fn internalCudnnInitDropoutState(
-        dropout_: f64, train: bool, dropout_seed: i64, options: TensorOptions
+        dropout_: f64, train: bool, dropout_seed: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__cudnn_init_dropout_state(@ptrCast(&c_tensors), dropout_,
                 if (train)  1  else  0,
                 dropout_seed,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalCudnnInitDropoutStateOut(
-        out: *Tensor, dropout_: f64, train: bool, dropout_seed: i64
+        out: *const Tensor, dropout_: f64, train: bool, dropout_seed: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__cudnn_init_dropout_state_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -1429,7 +1665,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCudnnRnn(
-        self: *const Tensor, weight: []*Tensor, weight_stride0: i64, weight_buf: ?*Tensor, hx: *Tensor, cx: ?*Tensor, mode_: i64, hidden_size: i64, proj_size: i64, num_layers: i64, batch_first: bool, dropout_: f64, train: bool, bidirectional: bool, batch_sizes: []i64, dropout_state: ?*Tensor
+        self: *const Tensor, weight: []*const Tensor, weight_stride0: i64, weight_buf: ?*const Tensor, hx: *const Tensor, cx: ?*const Tensor, mode_: i64, hidden_size: i64, proj_size: i64, num_layers: i64, batch_first: bool, dropout_: f64, train: bool, bidirectional: bool, batch_sizes: []i64, dropout_state: ?*const Tensor
     ) [5]Tensor {
         var c_tensors = [_]C_tensor{null} ** 5;
         __c.atg__cudnn_rnn(@ptrCast(&c_tensors), self.c_tensor,
@@ -1453,7 +1689,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCudnnRnnFlattenWeight(
-        weight_arr: []*Tensor, weight_stride0: i64, input_size: i64, mode_: i64, hidden_size: i64, proj_size: i64, num_layers: i64, batch_first: bool, bidirectional: bool
+        weight_arr: []*const Tensor, weight_stride0: i64, input_size: i64, mode_: i64, hidden_size: i64, proj_size: i64, num_layers: i64, batch_first: bool, bidirectional: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__cudnn_rnn_flatten_weight(@ptrCast(&c_tensors), ptrList(weight_arr).ptr, @intCast(weight_arr.len),
@@ -1470,7 +1706,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCudnnRnnFlattenWeightOut(
-        out: *Tensor, weight_arr: []*Tensor, weight_stride0: i64, input_size: i64, mode_: i64, hidden_size: i64, proj_size: i64, num_layers: i64, batch_first: bool, bidirectional: bool
+        out: *const Tensor, weight_arr: []*const Tensor, weight_stride0: i64, input_size: i64, mode_: i64, hidden_size: i64, proj_size: i64, num_layers: i64, batch_first: bool, bidirectional: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__cudnn_rnn_flatten_weight_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -1488,7 +1724,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCudnnRnnOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, out2: *Tensor, out3: *Tensor, out4: *Tensor, weight: []*Tensor, weight_stride0: i64, weight_buf: ?*Tensor, hx: *Tensor, cx: ?*Tensor, mode_: i64, hidden_size: i64, proj_size: i64, num_layers: i64, batch_first: bool, dropout_: f64, train: bool, bidirectional: bool, batch_sizes: []i64, dropout_state: ?*Tensor
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, out3: *const Tensor, out4: *const Tensor, weight: []*const Tensor, weight_stride0: i64, weight_buf: ?*const Tensor, hx: *const Tensor, cx: ?*const Tensor, mode_: i64, hidden_size: i64, proj_size: i64, num_layers: i64, batch_first: bool, dropout_: f64, train: bool, bidirectional: bool, batch_sizes: []i64, dropout_state: ?*const Tensor
     ) [5]Tensor {
         var c_tensors = [_]C_tensor{null} ** 5;
         __c.atg__cudnn_rnn_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -1525,7 +1761,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalDimArange(
-        like: *Tensor, dim_: i64
+        like: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__dim_arange(@ptrCast(&c_tensors), like.c_tensor,
@@ -1551,7 +1787,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalDirichletGrad(
-        x: *Tensor, alpha: *Tensor, total: *Tensor
+        x: *const Tensor, alpha: *const Tensor, total: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__dirichlet_grad(@ptrCast(&c_tensors), x.c_tensor,
@@ -1562,7 +1798,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalDirichletGradOut(
-        out: *Tensor, x: *Tensor, alpha: *Tensor, total: *Tensor
+        out: *const Tensor, x: *const Tensor, alpha: *const Tensor, total: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__dirichlet_grad_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -1574,7 +1810,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalEfficientAttentionBackward(
-        grad_out_: *Tensor, query: *Tensor, key: *Tensor, value: *Tensor, bias: ?*Tensor, out: *Tensor, cu_seqlens_q: ?*Tensor, cu_seqlens_k: ?*Tensor, max_seqlen_q: i64, max_seqlen_k: i64, logsumexp_: *Tensor, dropout_p: f64, philox_seed: *Tensor, philox_offset: *Tensor, custom_mask_type: i64, bias_requires_grad: bool, scale: ?f64, num_splits_key: ?i64
+        grad_out_: *const Tensor, query: *const Tensor, key: *const Tensor, value: *const Tensor, bias: ?*const Tensor, out: *const Tensor, cu_seqlens_q: ?*const Tensor, cu_seqlens_k: ?*const Tensor, max_seqlen_q: i64, max_seqlen_k: i64, logsumexp_: *const Tensor, dropout_p: f64, philox_seed: *const Tensor, philox_offset: *const Tensor, custom_mask_type: i64, bias_requires_grad: bool, scale: ?f64, num_splits_key: ?i64
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg__efficient_attention_backward(@ptrCast(&c_tensors), grad_out_.c_tensor,
@@ -1600,17 +1836,17 @@ pub const Tensor = struct {
     }
 
     pub fn internalEfficientzerotensor(
-        size_: []i64, options: TensorOptions
+        size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__efficientzerotensor(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalEfficientzerotensorOut(
-        out: *Tensor, size_: []i64
+        out: *const Tensor, size_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__efficientzerotensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -1620,7 +1856,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalEmbeddingBag(
-        weight: *Tensor, indices_: *Tensor, offsets: *Tensor, scale_grad_by_freq: bool, mode_: i64, sparse: bool, per_sample_weights: ?*Tensor, include_last_offset: bool, padding_idx: i64
+        weight: *const Tensor, indices_: *const Tensor, offsets: *const Tensor, scale_grad_by_freq: bool, mode_: i64, sparse: bool, per_sample_weights: ?*const Tensor, include_last_offset: bool, padding_idx: i64
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg__embedding_bag(@ptrCast(&c_tensors), weight.c_tensor,
@@ -1637,7 +1873,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalEmbeddingBagBackward(
-        gradient: *Tensor, indices_: *Tensor, offsets: *Tensor, offset2bag: *Tensor, bag_size: *Tensor, maximum_indices: *Tensor, num_weights: i64, scale_grad_by_freq: bool, mode_: i64, sparse: bool, per_sample_weights: ?*Tensor, padding_idx: i64
+        gradient: *const Tensor, indices_: *const Tensor, offsets: *const Tensor, offset2bag: *const Tensor, bag_size: *const Tensor, maximum_indices: *const Tensor, num_weights: i64, scale_grad_by_freq: bool, mode_: i64, sparse: bool, per_sample_weights: ?*const Tensor, padding_idx: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__embedding_bag_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -1657,7 +1893,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalEmbeddingBagDenseBackward(
-        gradient: *Tensor, indices_: *Tensor, offset2bag: *Tensor, bag_size: *Tensor, maximum_indices: *Tensor, num_weights: i64, scale_grad_by_freq: bool, mode_: i64, per_sample_weights: ?*Tensor, padding_idx: i64
+        gradient: *const Tensor, indices_: *const Tensor, offset2bag: *const Tensor, bag_size: *const Tensor, maximum_indices: *const Tensor, num_weights: i64, scale_grad_by_freq: bool, mode_: i64, per_sample_weights: ?*const Tensor, padding_idx: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__embedding_bag_dense_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -1675,7 +1911,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalEmbeddingBagDenseBackwardOut(
-        out: *Tensor, gradient: *Tensor, indices_: *Tensor, offset2bag: *Tensor, bag_size: *Tensor, maximum_indices: *Tensor, num_weights: i64, scale_grad_by_freq: bool, mode_: i64, per_sample_weights: ?*Tensor, padding_idx: i64
+        out: *const Tensor, gradient: *const Tensor, indices_: *const Tensor, offset2bag: *const Tensor, bag_size: *const Tensor, maximum_indices: *const Tensor, num_weights: i64, scale_grad_by_freq: bool, mode_: i64, per_sample_weights: ?*const Tensor, padding_idx: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__embedding_bag_dense_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -1694,7 +1930,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalEmbeddingBagForwardOnly(
-        weight: *Tensor, indices_: *Tensor, offsets: *Tensor, scale_grad_by_freq: bool, mode_: i64, sparse: bool, per_sample_weights: ?*Tensor, include_last_offset: bool, padding_idx: i64
+        weight: *const Tensor, indices_: *const Tensor, offsets: *const Tensor, scale_grad_by_freq: bool, mode_: i64, sparse: bool, per_sample_weights: ?*const Tensor, include_last_offset: bool, padding_idx: i64
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg__embedding_bag_forward_only(@ptrCast(&c_tensors), weight.c_tensor,
@@ -1711,7 +1947,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalEmbeddingBagForwardOnlyOut(
-        out0: *Tensor, out1: *Tensor, out2: *Tensor, out3: *Tensor, weight: *Tensor, indices_: *Tensor, offsets: *Tensor, scale_grad_by_freq: bool, mode_: i64, sparse: bool, per_sample_weights: ?*Tensor, include_last_offset: bool, padding_idx: i64
+        out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, out3: *const Tensor, weight: *const Tensor, indices_: *const Tensor, offsets: *const Tensor, scale_grad_by_freq: bool, mode_: i64, sparse: bool, per_sample_weights: ?*const Tensor, include_last_offset: bool, padding_idx: i64
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg__embedding_bag_forward_only_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -1732,7 +1968,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalEmbeddingBagOut(
-        out0: *Tensor, out1: *Tensor, out2: *Tensor, out3: *Tensor, weight: *Tensor, indices_: *Tensor, offsets: *Tensor, scale_grad_by_freq: bool, mode_: i64, sparse: bool, per_sample_weights: ?*Tensor, include_last_offset: bool, padding_idx: i64
+        out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, out3: *const Tensor, weight: *const Tensor, indices_: *const Tensor, offsets: *const Tensor, scale_grad_by_freq: bool, mode_: i64, sparse: bool, per_sample_weights: ?*const Tensor, include_last_offset: bool, padding_idx: i64
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg__embedding_bag_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -1753,7 +1989,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalEmbeddingBagPerSampleWeightsBackward(
-        gradient: *Tensor, weight: *Tensor, indices_: *Tensor, offsets: *Tensor, offset2bag: *Tensor, mode_: i64, padding_idx: i64
+        gradient: *const Tensor, weight: *const Tensor, indices_: *const Tensor, offsets: *const Tensor, offset2bag: *const Tensor, mode_: i64, padding_idx: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__embedding_bag_per_sample_weights_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -1768,7 +2004,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalEmbeddingBagPerSampleWeightsBackwardOut(
-        out: *Tensor, gradient: *Tensor, weight: *Tensor, indices_: *Tensor, offsets: *Tensor, offset2bag: *Tensor, mode_: i64, padding_idx: i64
+        out: *const Tensor, gradient: *const Tensor, weight: *const Tensor, indices_: *const Tensor, offsets: *const Tensor, offset2bag: *const Tensor, mode_: i64, padding_idx: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__embedding_bag_per_sample_weights_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -1784,7 +2020,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalEmbeddingBagSparseBackward(
-        gradient: *Tensor, indices_: *Tensor, offsets: *Tensor, offset2bag: *Tensor, bag_size: *Tensor, num_weights: i64, scale_grad_by_freq: bool, mode_: i64, per_sample_weights: ?*Tensor, padding_idx: i64
+        gradient: *const Tensor, indices_: *const Tensor, offsets: *const Tensor, offset2bag: *const Tensor, bag_size: *const Tensor, num_weights: i64, scale_grad_by_freq: bool, mode_: i64, per_sample_weights: ?*const Tensor, padding_idx: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__embedding_bag_sparse_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -1802,11 +2038,11 @@ pub const Tensor = struct {
     }
 
     pub fn internalEmptyAffineQuantized(
-        size_: []i64, options: TensorOptions, scale: f64, zero_point: i64
+        size_: []i64, options_: TensorOptions, scale: f64, zero_point: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__empty_affine_quantized(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt(),
+                options_.kind.cInt(), options_.device.cInt(),
                 scale,
                 zero_point);
         torch.readAndCleanError();
@@ -1814,7 +2050,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalEmptyAffineQuantizedOut(
-        out: *Tensor, size_: []i64, scale: f64, zero_point: i64
+        out: *const Tensor, size_: []i64, scale: f64, zero_point: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__empty_affine_quantized_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -1826,20 +2062,20 @@ pub const Tensor = struct {
     }
 
     pub fn internalEmptyPerChannelAffineQuantized(
-        size_: []i64, scales: *Tensor, zero_points: *Tensor, axis: i64, options: TensorOptions
+        size_: []i64, scales: *const Tensor, zero_points: *const Tensor, axis: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__empty_per_channel_affine_quantized(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
                 scales.c_tensor,
                 zero_points.c_tensor,
                 axis,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalEmptyPerChannelAffineQuantizedOut(
-        out: *Tensor, size_: []i64, scales: *Tensor, zero_points: *Tensor, axis: i64
+        out: *const Tensor, size_: []i64, scales: *const Tensor, zero_points: *const Tensor, axis: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__empty_per_channel_affine_quantized_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -1852,7 +2088,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalEuclideanDist(
-        x1: *Tensor, x2: *Tensor
+        x1: *const Tensor, x2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__euclidean_dist(@ptrCast(&c_tensors), x1.c_tensor,
@@ -1862,7 +2098,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalEuclideanDistOut(
-        out: *Tensor, x1: *Tensor, x2: *Tensor
+        out: *const Tensor, x1: *const Tensor, x2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__euclidean_dist_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -1873,7 +2109,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFakeQuantizeLearnablePerChannelAffine(
-        self: *const Tensor, scale: *Tensor, zero_point: *Tensor, axis: i64, quant_min: i64, quant_max: i64, grad_factor: f64
+        self: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, axis: i64, quant_min: i64, quant_max: i64, grad_factor: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__fake_quantize_learnable_per_channel_affine(@ptrCast(&c_tensors), self.c_tensor,
@@ -1888,7 +2124,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFakeQuantizeLearnablePerChannelAffineBackward(
-        self: *const Tensor, gradient: *Tensor, scale: *Tensor, zero_point: *Tensor, axis: i64, quant_min: i64, quant_max: i64, grad_factor: f64
+        self: *const Tensor, gradient: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, axis: i64, quant_min: i64, quant_max: i64, grad_factor: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__fake_quantize_learnable_per_channel_affine_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -1904,7 +2140,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFakeQuantizeLearnablePerChannelAffineOut(
-        self: *const Tensor, out: *Tensor, scale: *Tensor, zero_point: *Tensor, axis: i64, quant_min: i64, quant_max: i64, grad_factor: f64
+        self: *const Tensor, out: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, axis: i64, quant_min: i64, quant_max: i64, grad_factor: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__fake_quantize_learnable_per_channel_affine_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -1920,7 +2156,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFakeQuantizeLearnablePerTensorAffine(
-        self: *const Tensor, scale: *Tensor, zero_point: *Tensor, quant_min: i64, quant_max: i64, grad_factor: f64
+        self: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, quant_min: i64, quant_max: i64, grad_factor: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__fake_quantize_learnable_per_tensor_affine(@ptrCast(&c_tensors), self.c_tensor,
@@ -1934,7 +2170,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFakeQuantizeLearnablePerTensorAffineBackward(
-        self: *const Tensor, gradient: *Tensor, scale: *Tensor, zero_point: *Tensor, quant_min: i64, quant_max: i64, grad_factor: f64
+        self: *const Tensor, gradient: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, quant_min: i64, quant_max: i64, grad_factor: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__fake_quantize_learnable_per_tensor_affine_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -1949,7 +2185,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFakeQuantizeLearnablePerTensorAffineOut(
-        self: *const Tensor, out: *Tensor, scale: *Tensor, zero_point: *Tensor, quant_min: i64, quant_max: i64, grad_factor: f64
+        self: *const Tensor, out: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, quant_min: i64, quant_max: i64, grad_factor: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__fake_quantize_learnable_per_tensor_affine_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -1964,7 +2200,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFakeQuantizePerTensorAffineCachemaskTensorQparams(
-        self: *const Tensor, scale: *Tensor, zero_point: *Tensor, fake_quant_enabled: *Tensor, quant_min: i64, quant_max: i64
+        self: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, fake_quant_enabled: *const Tensor, quant_min: i64, quant_max: i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__fake_quantize_per_tensor_affine_cachemask_tensor_qparams(@ptrCast(&c_tensors), self.c_tensor,
@@ -1978,7 +2214,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFakeQuantizePerTensorAffineCachemaskTensorQparamsOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, scale: *Tensor, zero_point: *Tensor, fake_quant_enabled: *Tensor, quant_min: i64, quant_max: i64
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, fake_quant_enabled: *const Tensor, quant_min: i64, quant_max: i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__fake_quantize_per_tensor_affine_cachemask_tensor_qparams_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -2006,7 +2242,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFftC2cOut(
-        self: *const Tensor, out: *Tensor, dim_: []i64, normalization: i64, forward: bool
+        self: *const Tensor, out: *const Tensor, dim_: []i64, normalization: i64, forward: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__fft_c2c_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2031,7 +2267,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFftC2rOut(
-        self: *const Tensor, out: *Tensor, dim_: []i64, normalization: i64, last_dim_size: i64
+        self: *const Tensor, out: *const Tensor, dim_: []i64, normalization: i64, last_dim_size: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__fft_c2r_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2056,7 +2292,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFftR2cOut(
-        self: *const Tensor, out: *Tensor, dim_: []i64, normalization: i64, onesided: bool
+        self: *const Tensor, out: *const Tensor, dim_: []i64, normalization: i64, onesided: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__fft_r2c_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2081,7 +2317,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFlashAttentionBackward(
-        grad_out: *Tensor, query: *Tensor, key: *Tensor, value: *Tensor, out: *Tensor, logsumexp_: *Tensor, cum_seq_q: *Tensor, cum_seq_k: *Tensor, max_q: i64, max_k: i64, dropout_p: f64, is_causal: bool, philox_seed: *Tensor, philox_offset: *Tensor, scale: ?f64
+        grad_out: *const Tensor, query: *const Tensor, key: *const Tensor, value: *const Tensor, out: *const Tensor, logsumexp_: *const Tensor, cum_seq_q: *const Tensor, cum_seq_k: *const Tensor, max_q: i64, max_k: i64, dropout_p: f64, is_causal: bool, philox_seed: *const Tensor, philox_offset: *const Tensor, scale: ?f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__flash_attention_backward(@ptrCast(&c_tensors), grad_out.c_tensor,
@@ -2116,7 +2352,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFoobarOut(
-        self: *const Tensor, out: *Tensor, arg1: bool, arg2: bool, arg3: bool
+        self: *const Tensor, out: *const Tensor, arg1: bool, arg2: bool, arg3: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__foobar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2129,7 +2365,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFunctionalAssertAsync(
-        self: *const Tensor, assert_msg: []u8, dep_token: *Tensor
+        self: *const Tensor, assert_msg: []const u8, dep_token: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__functional_assert_async(@ptrCast(&c_tensors), self.c_tensor,
@@ -2140,7 +2376,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFunctionalAssertScalar(
-        self_scalar: Scalar, assert_msg: []u8, dep_token: *Tensor
+        self_scalar: Scalar, assert_msg: []const u8, dep_token: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__functional_assert_scalar(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
@@ -2151,7 +2387,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFunctionalSymConstrainRange(
-        size_: Scalar, min_: ?i64, max_: ?i64, dep_token: *Tensor
+        size_: Scalar, min_: ?i64, max_: ?i64, dep_token: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__functional_sym_constrain_range(@ptrCast(&c_tensors), size_.into().c_scalar,
@@ -2163,7 +2399,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFunctionalSymConstrainRangeForSize(
-        size_: Scalar, min_: ?i64, max_: ?i64, dep_token: *Tensor
+        size_: Scalar, min_: ?i64, max_: ?i64, dep_token: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__functional_sym_constrain_range_for_size(@ptrCast(&c_tensors), size_.into().c_scalar,
@@ -2185,7 +2421,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFusedDropoutOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, p: f64
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, p: f64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__fused_dropout_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -2197,7 +2433,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFusedMovingAvgObsFqHelper(
-        self: *const Tensor, observer_on: *Tensor, fake_quant_on: *Tensor, running_min: *Tensor, running_max: *Tensor, scale: *Tensor, zero_point: *Tensor, averaging_const: f64, quant_min: i64, quant_max: i64, ch_axis: i64, per_row_fake_quant: bool, symmetric_quant: bool
+        self: *const Tensor, observer_on: *const Tensor, fake_quant_on: *const Tensor, running_min: *const Tensor, running_max: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, averaging_const: f64, quant_min: i64, quant_max: i64, ch_axis: i64, per_row_fake_quant: bool, symmetric_quant: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__fused_moving_avg_obs_fq_helper(@ptrCast(&c_tensors), self.c_tensor,
@@ -2218,7 +2454,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFusedMovingAvgObsFqHelperFunctional(
-        self: *const Tensor, observer_on: *Tensor, fake_quant_on: *Tensor, running_min: *Tensor, running_max: *Tensor, scale: *Tensor, zero_point: *Tensor, averaging_const: f64, quant_min: i64, quant_max: i64, ch_axis: i64, per_row_fake_quant: bool, symmetric_quant: bool
+        self: *const Tensor, observer_on: *const Tensor, fake_quant_on: *const Tensor, running_min: *const Tensor, running_max: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, averaging_const: f64, quant_min: i64, quant_max: i64, ch_axis: i64, per_row_fake_quant: bool, symmetric_quant: bool
     ) [6]Tensor {
         var c_tensors = [_]C_tensor{null} ** 6;
         __c.atg__fused_moving_avg_obs_fq_helper_functional(@ptrCast(&c_tensors), self.c_tensor,
@@ -2239,7 +2475,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFusedMovingAvgObsFqHelperOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, observer_on: *Tensor, fake_quant_on: *Tensor, running_min: *Tensor, running_max: *Tensor, scale: *Tensor, zero_point: *Tensor, averaging_const: f64, quant_min: i64, quant_max: i64, ch_axis: i64, per_row_fake_quant: bool, symmetric_quant: bool
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, observer_on: *const Tensor, fake_quant_on: *const Tensor, running_min: *const Tensor, running_max: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, averaging_const: f64, quant_min: i64, quant_max: i64, ch_axis: i64, per_row_fake_quant: bool, symmetric_quant: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__fused_moving_avg_obs_fq_helper_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -2262,7 +2498,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFusedSdpChoice(
-        query: *Tensor, key: *Tensor, value: *Tensor, attn_mask: ?*Tensor, dropout_p: f64, is_causal: bool, scale: ?f64
+        query: *const Tensor, key: *const Tensor, value: *const Tensor, attn_mask: ?*const Tensor, dropout_p: f64, is_causal: bool, scale: ?f64
     ) i64 {
         const return_ = __c.atg__fused_sdp_choice(query.c_tensor,
                 key.c_tensor,
@@ -2296,7 +2532,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalFwPrimalCopyOut(
-        self: *const Tensor, out: *Tensor, level: i64
+        self: *const Tensor, out: *const Tensor, level: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__fw_primal_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2307,7 +2543,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalGatherSparseBackward(
-        self: *const Tensor, dim_: i64, index_: *Tensor, gradient: *Tensor
+        self: *const Tensor, dim_: i64, index_: *const Tensor, gradient: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__gather_sparse_backward(@ptrCast(&c_tensors), self.c_tensor,
@@ -2319,7 +2555,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalGridSampler2dCpuFallback(
-        self: *const Tensor, grid: *Tensor, interpolation_mode: i64, padding_mode: i64, align_corners: bool
+        self: *const Tensor, grid: *const Tensor, interpolation_mode: i64, padding_mode: i64, align_corners: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__grid_sampler_2d_cpu_fallback(@ptrCast(&c_tensors), self.c_tensor,
@@ -2332,7 +2568,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalGridSampler2dCpuFallbackBackward(
-        self: *const Tensor, grad_output: *Tensor, grid: *Tensor, interpolation_mode: i64, padding_mode: i64, align_corners: bool
+        self: *const Tensor, grad_output: *const Tensor, grid: *const Tensor, interpolation_mode: i64, padding_mode: i64, align_corners: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__grid_sampler_2d_cpu_fallback_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -2346,7 +2582,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalGridSampler2dCpuFallbackOut(
-        self: *const Tensor, out: *Tensor, grid: *Tensor, interpolation_mode: i64, padding_mode: i64, align_corners: bool
+        self: *const Tensor, out: *const Tensor, grid: *const Tensor, interpolation_mode: i64, padding_mode: i64, align_corners: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__grid_sampler_2d_cpu_fallback_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2360,7 +2596,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalHasCompatibleShallowCopyType(
-        self: *const Tensor, from: *Tensor
+        self: *const Tensor, from: *const Tensor
     ) bool {
         const return_ = __c.atg__has_compatible_shallow_copy_type(self.c_tensor,
                 from.c_tensor);
@@ -2369,7 +2605,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalHasSameStorageNumel(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) bool {
         const return_ = __c.atg__has_same_storage_numel(self.c_tensor,
                 other.c_tensor);
@@ -2378,26 +2614,26 @@ pub const Tensor = struct {
     }
 
     pub fn internalHistogramddBinEdges(
-        self: *const Tensor, bins: []i64, range_: []f64, weight: ?*Tensor, density: bool
+        self: *const Tensor, bins: []i64, range_: []f64, weight: ?*const Tensor, density: bool
     ) []Tensor {
         const c_tensors = __c.atg__histogramdd_bin_edges(self.c_tensor,
                 bins.ptr, @intCast(bins.len),
                 range_.ptr, @intCast(range_.len),
                 weight orelse null,
                 if (density)  1  else  0);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
 
     pub fn internalHistogramddBinEdgesOut(
-        self: *const Tensor, out: []*Tensor, bins: []i64, range_: []f64, weight: ?*Tensor, density: bool
+        self: *const Tensor, out: []*const Tensor, bins: []i64, range_: []f64, weight: ?*const Tensor, density: bool
     ) void {
         __c.atg__histogramdd_bin_edges_out(ptrList(out).ptr, @intCast(out.len),
                 self.c_tensor,
@@ -2410,7 +2646,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalHistogramddFromBinCts(
-        self: *const Tensor, bins: []i64, range_: []f64, weight: ?*Tensor, density: bool
+        self: *const Tensor, bins: []i64, range_: []f64, weight: ?*const Tensor, density: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__histogramdd_from_bin_cts(@ptrCast(&c_tensors), self.c_tensor,
@@ -2423,7 +2659,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalHistogramddFromBinCtsOut(
-        self: *const Tensor, out: *Tensor, bins: []i64, range_: []f64, weight: ?*Tensor, density: bool
+        self: *const Tensor, out: *const Tensor, bins: []i64, range_: []f64, weight: ?*const Tensor, density: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__histogramdd_from_bin_cts_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2437,7 +2673,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalHistogramddFromBinTensors(
-        self: *const Tensor, bins: []*Tensor, weight: ?*Tensor, density: bool
+        self: *const Tensor, bins: []*const Tensor, weight: ?*const Tensor, density: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__histogramdd_from_bin_tensors(@ptrCast(&c_tensors), self.c_tensor,
@@ -2449,7 +2685,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalHistogramddFromBinTensorsOut(
-        self: *const Tensor, out: *Tensor, bins: []*Tensor, weight: ?*Tensor, density: bool
+        self: *const Tensor, out: *const Tensor, bins: []*const Tensor, weight: ?*const Tensor, density: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__histogramdd_from_bin_tensors_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2462,7 +2698,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalIndexPutImpl(
-        self: *const Tensor, indices_: []?*Tensor, values_: *Tensor, accumulate: bool, unsafe: bool
+        self: *const Tensor, indices_: []?*const Tensor, values_: *const Tensor, accumulate: bool, unsafe: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__index_put_impl(@ptrCast(&c_tensors), self.c_tensor,
@@ -2475,7 +2711,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalIndexPutImpl_(
-        self: *Tensor, indices_: []?*Tensor, values_: *Tensor, accumulate: bool, unsafe: bool
+        self: *Tensor, indices_: []?*const Tensor, values_: *const Tensor, accumulate: bool, unsafe: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__index_put_impl_(@ptrCast(&c_tensors), self.c_tensor,
@@ -2488,7 +2724,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalIndexPutImplOut(
-        self: *const Tensor, out: *Tensor, indices_: []?*Tensor, values_: *Tensor, accumulate: bool, unsafe: bool
+        self: *const Tensor, out: *const Tensor, indices_: []?*const Tensor, values_: *const Tensor, accumulate: bool, unsafe: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__index_put_impl_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2520,7 +2756,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalIndicesCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__indices_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2530,7 +2766,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalIntMm(
-        self: *const Tensor, mat2: *Tensor
+        self: *const Tensor, mat2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__int_mm(@ptrCast(&c_tensors), self.c_tensor,
@@ -2540,7 +2776,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalIntMmOut(
-        self: *const Tensor, out: *Tensor, mat2: *Tensor
+        self: *const Tensor, out: *const Tensor, mat2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__int_mm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2586,7 +2822,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLinalgCheckErrors(
-        info: *Tensor, api_name: []u8, is_matrix: bool
+        info: *const Tensor, api_name: []const u8, is_matrix: bool
     ) void {
         __c.atg__linalg_check_errors(info.c_tensor,
                 api_name.ptr, api_name.len,
@@ -2596,7 +2832,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLinalgDet(
-        a: *Tensor
+        a: *const Tensor
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__linalg_det(@ptrCast(&c_tensors), a.c_tensor);
@@ -2605,7 +2841,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLinalgDetResult(
-        result: *Tensor, lu: *Tensor, pivots: *Tensor, a: *Tensor
+        result: *const Tensor, lu: *const Tensor, pivots: *const Tensor, a: *const Tensor
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__linalg_det_result(@ptrCast(&c_tensors), result.c_tensor,
@@ -2617,7 +2853,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLinalgEigh(
-        a: *Tensor, uplo: []u8, compute_v: bool
+        a: *const Tensor, uplo: []const u8, compute_v: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__linalg_eigh(@ptrCast(&c_tensors), a.c_tensor,
@@ -2628,7 +2864,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLinalgEighEigenvalues(
-        eigenvalues: *Tensor, eigenvectors: *Tensor, a: *Tensor, uplo: []u8, compute_v: bool
+        eigenvalues: *const Tensor, eigenvectors: *const Tensor, a: *const Tensor, uplo: []const u8, compute_v: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__linalg_eigh_eigenvalues(@ptrCast(&c_tensors), eigenvalues.c_tensor,
@@ -2650,7 +2886,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLinalgSlogdet(
-        a: *Tensor
+        a: *const Tensor
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg__linalg_slogdet(@ptrCast(&c_tensors), a.c_tensor);
@@ -2659,7 +2895,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLinalgSlogdetSign(
-        sign_: *Tensor, logabsdet: *Tensor, lu: *Tensor, pivots: *Tensor, a: *Tensor
+        sign_: *const Tensor, logabsdet: *const Tensor, lu: *const Tensor, pivots: *const Tensor, a: *const Tensor
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg__linalg_slogdet_sign(@ptrCast(&c_tensors), sign_.c_tensor,
@@ -2672,7 +2908,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLinalgSolveEx(
-        a: *Tensor, b: *Tensor, left: bool, check_errors: bool
+        a: *const Tensor, b: *const Tensor, left: bool, check_errors: bool
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg__linalg_solve_ex(@ptrCast(&c_tensors), a.c_tensor,
@@ -2684,7 +2920,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLinalgSolveExResult(
-        result: *Tensor, lu: *Tensor, pivots: *Tensor, info: *Tensor, a: *Tensor, b: *Tensor, left: bool, check_errors: bool
+        result: *const Tensor, lu: *const Tensor, pivots: *const Tensor, info: *const Tensor, a: *const Tensor, b: *const Tensor, left: bool, check_errors: bool
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg__linalg_solve_ex_result(@ptrCast(&c_tensors), result.c_tensor,
@@ -2700,7 +2936,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLinalgSvd(
-        a: *Tensor, full_matrices: bool, compute_uv: bool, driver: []u8
+        a: *const Tensor, full_matrices: bool, compute_uv: bool, driver: []const u8
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__linalg_svd(@ptrCast(&c_tensors), a.c_tensor,
@@ -2712,7 +2948,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLinalgSvdU(
-        u: *Tensor, s: *Tensor, vh: *Tensor, a: *Tensor, full_matrices: bool, compute_uv: bool, driver: []u8
+        u: *const Tensor, s: *const Tensor, vh: *const Tensor, a: *const Tensor, full_matrices: bool, compute_uv: bool, driver: []const u8
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__linalg_svd_u(@ptrCast(&c_tensors), u.c_tensor,
@@ -2738,7 +2974,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLogSoftmaxBackwardData(
-        grad_output: *Tensor, output: *Tensor, dim_: i64, input_dtype: Kind
+        grad_output: *const Tensor, output: *const Tensor, dim_: i64, input_dtype: Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__log_softmax_backward_data(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -2750,7 +2986,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLogSoftmaxBackwardDataOut(
-        out: *Tensor, grad_output: *Tensor, output: *Tensor, dim_: i64, input_dtype: Kind
+        out: *const Tensor, grad_output: *const Tensor, output: *const Tensor, dim_: i64, input_dtype: Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__log_softmax_backward_data_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2763,7 +2999,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLogSoftmaxOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, half_to_float: bool
+        self: *const Tensor, out: *const Tensor, dim_: i64, half_to_float: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__log_softmax_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2785,7 +3021,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLogcumsumexpOut(
-        self: *const Tensor, out: *Tensor, dim_: i64
+        self: *const Tensor, out: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__logcumsumexp_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2796,7 +3032,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLstmMps(
-        self: *const Tensor, hx: []*Tensor, params: []*Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool, batch_first: bool
+        self: *const Tensor, hx: []*const Tensor, params: []*const Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool, batch_first: bool
     ) [6]Tensor {
         var c_tensors = [_]C_tensor{null} ** 6;
         __c.atg__lstm_mps(@ptrCast(&c_tensors), self.c_tensor,
@@ -2813,7 +3049,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalLstmMpsOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, out2: *Tensor, out3: *Tensor, out4: *Tensor, out5: *Tensor, hx: []*Tensor, params: []*Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool, batch_first: bool
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, out3: *const Tensor, out4: *const Tensor, out5: *const Tensor, hx: []*const Tensor, params: []*const Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool, batch_first: bool
     ) [6]Tensor {
         var c_tensors = [_]C_tensor{null} ** 6;
         __c.atg__lstm_mps_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -2847,16 +3083,16 @@ pub const Tensor = struct {
     }
 
     pub fn internalMakeDepToken(
-        options: TensorOptions
+        options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg__make_dep_token(@ptrCast(&c_tensors), options.kind.cInt(), options.device.cInt());
+        __c.atg__make_dep_token(@ptrCast(&c_tensors), options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalMakeDual(
-        primal: *Tensor, tangent: *Tensor, level: i64
+        primal: *const Tensor, tangent: *const Tensor, level: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__make_dual(@ptrCast(&c_tensors), primal.c_tensor,
@@ -2867,7 +3103,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalMakeDualCopy(
-        primal: *Tensor, tangent: *Tensor, level: i64
+        primal: *const Tensor, tangent: *const Tensor, level: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__make_dual_copy(@ptrCast(&c_tensors), primal.c_tensor,
@@ -2878,7 +3114,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalMakeDualCopyOut(
-        out: *Tensor, primal: *Tensor, tangent: *Tensor, level: i64
+        out: *const Tensor, primal: *const Tensor, tangent: *const Tensor, level: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__make_dual_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2890,7 +3126,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalMakePerChannelQuantizedTensor(
-        self: *const Tensor, scale: *Tensor, zero_point: *Tensor, axis: i64
+        self: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, axis: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__make_per_channel_quantized_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -2902,7 +3138,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalMakePerChannelQuantizedTensorOut(
-        self: *const Tensor, out: *Tensor, scale: *Tensor, zero_point: *Tensor, axis: i64
+        self: *const Tensor, out: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, axis: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__make_per_channel_quantized_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2926,7 +3162,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalMakePerTensorQuantizedTensorOut(
-        self: *const Tensor, out: *Tensor, scale: f64, zero_point: i64
+        self: *const Tensor, out: *const Tensor, scale: f64, zero_point: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__make_per_tensor_quantized_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2938,7 +3174,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalMaskedScale(
-        self: *const Tensor, mask: *Tensor, scale: f64
+        self: *const Tensor, mask: *const Tensor, scale: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__masked_scale(@ptrCast(&c_tensors), self.c_tensor,
@@ -2949,7 +3185,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalMaskedScaleOut(
-        self: *const Tensor, out: *Tensor, mask: *Tensor, scale: f64
+        self: *const Tensor, out: *const Tensor, mask: *const Tensor, scale: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__masked_scale_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2961,7 +3197,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalMaskedSoftmax(
-        self: *const Tensor, mask: *Tensor, dim_: ?i64, mask_type: ?i64
+        self: *const Tensor, mask: *const Tensor, dim_: ?i64, mask_type: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__masked_softmax(@ptrCast(&c_tensors), self.c_tensor,
@@ -2973,7 +3209,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalMaskedSoftmaxBackward(
-        grad_output: *Tensor, output: *Tensor, mask: *Tensor, dim_: ?i64
+        grad_output: *const Tensor, output: *const Tensor, mask: *const Tensor, dim_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__masked_softmax_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -2985,7 +3221,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalMaskedSoftmaxBackwardOut(
-        out: *Tensor, grad_output: *Tensor, output: *Tensor, mask: *Tensor, dim_: ?i64
+        out: *const Tensor, grad_output: *const Tensor, output: *const Tensor, mask: *const Tensor, dim_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__masked_softmax_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -2998,7 +3234,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalMaskedSoftmaxOut(
-        self: *const Tensor, out: *Tensor, mask: *Tensor, dim_: ?i64, mask_type: ?i64
+        self: *const Tensor, out: *const Tensor, mask: *const Tensor, dim_: ?i64, mask_type: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__masked_softmax_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3011,7 +3247,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalMixedDtypesLinear(
-        self: *const Tensor, weight: *Tensor, scale: *Tensor, bias: ?*Tensor, activation: []u8
+        self: *const Tensor, weight: *const Tensor, scale: *const Tensor, bias: ?*const Tensor, activation: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__mixed_dtypes_linear(@ptrCast(&c_tensors), self.c_tensor,
@@ -3034,7 +3270,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalMkldnnReshapeOut(
-        self: *const Tensor, out: *Tensor, shape: []i64
+        self: *const Tensor, out: *const Tensor, shape: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__mkldnn_reshape_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3067,7 +3303,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalMkldnnTransposeOut(
-        self: *const Tensor, out: *Tensor, dim0: i64, dim1: i64
+        self: *const Tensor, out: *const Tensor, dim0: i64, dim1: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__mkldnn_transpose_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3079,7 +3315,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalMpsConvolution(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__mps_convolution(@ptrCast(&c_tensors), self.c_tensor,
@@ -3094,7 +3330,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalMpsConvolutionOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, bias: ?*Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__mps_convolution_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3110,7 +3346,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalMpsConvolutionTranspose(
-        self: *const Tensor, weight: *Tensor, padding: []i64, output_padding: []i64, stride_: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, padding: []i64, output_padding: []i64, stride_: []i64, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__mps_convolution_transpose(@ptrCast(&c_tensors), self.c_tensor,
@@ -3125,7 +3361,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalMpsConvolutionTransposeOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, padding: []i64, output_padding: []i64, stride_: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, padding: []i64, output_padding: []i64, stride_: []i64, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__mps_convolution_transpose_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3141,7 +3377,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNativeBatchNormLegit(
-        self: *const Tensor, weight: ?*Tensor, bias: ?*Tensor, running_mean: *Tensor, running_var: *Tensor, training: bool, momentum: f64, eps: f64
+        self: *const Tensor, weight: ?*const Tensor, bias: ?*const Tensor, running_mean: *const Tensor, running_var: *const Tensor, training: bool, momentum: f64, eps: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__native_batch_norm_legit(@ptrCast(&c_tensors), self.c_tensor,
@@ -3157,7 +3393,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNativeBatchNormLegitFunctional(
-        self: *const Tensor, weight: ?*Tensor, bias: ?*Tensor, running_mean: *Tensor, running_var: *Tensor, training: bool, momentum: f64, eps: f64
+        self: *const Tensor, weight: ?*const Tensor, bias: ?*const Tensor, running_mean: *const Tensor, running_var: *const Tensor, training: bool, momentum: f64, eps: f64
     ) [5]Tensor {
         var c_tensors = [_]C_tensor{null} ** 5;
         __c.atg__native_batch_norm_legit_functional(@ptrCast(&c_tensors), self.c_tensor,
@@ -3173,7 +3409,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNativeBatchNormLegitNoStats(
-        self: *const Tensor, weight: ?*Tensor, bias: ?*Tensor, training: bool, momentum: f64, eps: f64
+        self: *const Tensor, weight: ?*const Tensor, bias: ?*const Tensor, training: bool, momentum: f64, eps: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__native_batch_norm_legit_no_stats(@ptrCast(&c_tensors), self.c_tensor,
@@ -3187,7 +3423,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNativeBatchNormLegitNoStatsOut(
-        self: *const Tensor, out: *Tensor, save_mean: *Tensor, save_invstd: *Tensor, weight: ?*Tensor, bias: ?*Tensor, training: bool, momentum: f64, eps: f64
+        self: *const Tensor, out: *const Tensor, save_mean: *const Tensor, save_invstd: *const Tensor, weight: ?*const Tensor, bias: ?*const Tensor, training: bool, momentum: f64, eps: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__native_batch_norm_legit_no_stats_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3204,7 +3440,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNativeBatchNormLegitNoTraining(
-        self: *const Tensor, weight: ?*Tensor, bias: ?*Tensor, running_mean: *Tensor, running_var: *Tensor, momentum: f64, eps: f64
+        self: *const Tensor, weight: ?*const Tensor, bias: ?*const Tensor, running_mean: *const Tensor, running_var: *const Tensor, momentum: f64, eps: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__native_batch_norm_legit_no_training(@ptrCast(&c_tensors), self.c_tensor,
@@ -3219,7 +3455,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNativeBatchNormLegitNoTrainingOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, out2: *Tensor, weight: ?*Tensor, bias: ?*Tensor, running_mean: *Tensor, running_var: *Tensor, momentum: f64, eps: f64
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, weight: ?*const Tensor, bias: ?*const Tensor, running_mean: *const Tensor, running_var: *const Tensor, momentum: f64, eps: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__native_batch_norm_legit_no_training_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -3237,7 +3473,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNativeBatchNormLegitOut(
-        self: *const Tensor, out: *Tensor, save_mean: *Tensor, save_invstd: *Tensor, weight: ?*Tensor, bias: ?*Tensor, running_mean: *Tensor, running_var: *Tensor, training: bool, momentum: f64, eps: f64
+        self: *const Tensor, out: *const Tensor, save_mean: *const Tensor, save_invstd: *const Tensor, weight: ?*const Tensor, bias: ?*const Tensor, running_mean: *const Tensor, running_var: *const Tensor, training: bool, momentum: f64, eps: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__native_batch_norm_legit_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3256,7 +3492,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNativeMultiHeadAttention(
-        query: *Tensor, key: *Tensor, value: *Tensor, embed_dim: i64, num_head: i64, qkv_weight: *Tensor, qkv_bias: *Tensor, proj_weight: *Tensor, proj_bias: *Tensor, mask: ?*Tensor, need_weights: bool, average_attn_weights: bool, mask_type: ?i64
+        query: *const Tensor, key: *const Tensor, value: *const Tensor, embed_dim: i64, num_head: i64, qkv_weight: *const Tensor, qkv_bias: *const Tensor, proj_weight: *const Tensor, proj_bias: *const Tensor, mask: ?*const Tensor, need_weights: bool, average_attn_weights: bool, mask_type: ?i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__native_multi_head_attention(@ptrCast(&c_tensors), query.c_tensor,
@@ -3277,7 +3513,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNativeMultiHeadAttentionOut(
-        out0: *Tensor, out1: *Tensor, query: *Tensor, key: *Tensor, value: *Tensor, embed_dim: i64, num_head: i64, qkv_weight: *Tensor, qkv_bias: *Tensor, proj_weight: *Tensor, proj_bias: *Tensor, mask: ?*Tensor, need_weights: bool, average_attn_weights: bool, mask_type: ?i64
+        out0: *const Tensor, out1: *const Tensor, query: *const Tensor, key: *const Tensor, value: *const Tensor, embed_dim: i64, num_head: i64, qkv_weight: *const Tensor, qkv_bias: *const Tensor, proj_weight: *const Tensor, proj_bias: *const Tensor, mask: ?*const Tensor, need_weights: bool, average_attn_weights: bool, mask_type: ?i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__native_multi_head_attention_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -3318,7 +3554,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNegViewCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__neg_view_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3328,7 +3564,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNestedFromPadded(
-        padded: *Tensor, cpu_nested_shape_example: *Tensor, fuse_transform_0213: bool
+        padded: *const Tensor, cpu_nested_shape_example: *const Tensor, fuse_transform_0213: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nested_from_padded(@ptrCast(&c_tensors), padded.c_tensor,
@@ -3339,7 +3575,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNestedFromPaddedAndNestedExample(
-        padded: *Tensor, nt_example: *Tensor
+        padded: *const Tensor, nt_example: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nested_from_padded_and_nested_example(@ptrCast(&c_tensors), padded.c_tensor,
@@ -3349,7 +3585,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNestedFromPaddedAndNestedExampleOut(
-        out: *Tensor, padded: *Tensor, nt_example: *Tensor
+        out: *const Tensor, padded: *const Tensor, nt_example: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nested_from_padded_and_nested_example_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3360,7 +3596,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNestedFromPaddedOut(
-        out: *Tensor, padded: *Tensor, cpu_nested_shape_example: *Tensor, fuse_transform_0213: bool
+        out: *const Tensor, padded: *const Tensor, cpu_nested_shape_example: *const Tensor, fuse_transform_0213: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nested_from_padded_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3372,7 +3608,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNestedGetJaggedDummy(
-        any_: *Tensor
+        any_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nested_get_jagged_dummy(@ptrCast(&c_tensors), any_.c_tensor);
@@ -3425,7 +3661,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNestedGetValuesCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nested_get_values_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3435,7 +3671,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNestedSelectBackward(
-        self: *const Tensor, grad_output: *Tensor, dim_: i64, index_: i64
+        self: *const Tensor, grad_output: *const Tensor, dim_: i64, index_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nested_select_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -3447,7 +3683,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNestedSumBackward(
-        self: *const Tensor, gradient: *Tensor, dim_: ?[]i64, keepdim: bool
+        self: *const Tensor, gradient: *const Tensor, dim_: ?[]i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nested_sum_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -3459,7 +3695,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNestedViewFromBuffer(
-        self: *const Tensor, nested_size: *Tensor, nested_strides: *Tensor, offsets: *Tensor
+        self: *const Tensor, nested_size: *const Tensor, nested_strides: *const Tensor, offsets: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nested_view_from_buffer(@ptrCast(&c_tensors), self.c_tensor,
@@ -3471,7 +3707,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNestedViewFromBufferCopy(
-        self: *const Tensor, nested_size: *Tensor, nested_strides: *Tensor, offsets: *Tensor
+        self: *const Tensor, nested_size: *const Tensor, nested_strides: *const Tensor, offsets: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nested_view_from_buffer_copy(@ptrCast(&c_tensors), self.c_tensor,
@@ -3483,7 +3719,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNestedViewFromBufferCopyOut(
-        self: *const Tensor, out: *Tensor, nested_size: *Tensor, nested_strides: *Tensor, offsets: *Tensor
+        self: *const Tensor, out: *const Tensor, nested_size: *const Tensor, nested_strides: *const Tensor, offsets: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nested_view_from_buffer_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3496,7 +3732,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNestedViewFromJagged(
-        self: *const Tensor, offsets: *Tensor, dummy: *Tensor, lengths: ?*Tensor, ragged_idx: i64
+        self: *const Tensor, offsets: *const Tensor, dummy: *const Tensor, lengths: ?*const Tensor, ragged_idx: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nested_view_from_jagged(@ptrCast(&c_tensors), self.c_tensor,
@@ -3509,7 +3745,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNestedViewFromJaggedCopy(
-        self: *const Tensor, offsets: *Tensor, dummy: *Tensor, lengths: ?*Tensor, ragged_idx: i64
+        self: *const Tensor, offsets: *const Tensor, dummy: *const Tensor, lengths: ?*const Tensor, ragged_idx: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nested_view_from_jagged_copy(@ptrCast(&c_tensors), self.c_tensor,
@@ -3522,7 +3758,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNestedViewFromJaggedCopyOut(
-        self: *const Tensor, out: *Tensor, offsets: *Tensor, dummy: *Tensor, lengths: ?*Tensor, ragged_idx: i64
+        self: *const Tensor, out: *const Tensor, offsets: *const Tensor, dummy: *const Tensor, lengths: ?*const Tensor, ragged_idx: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nested_view_from_jagged_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3536,7 +3772,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNewZerosWithSameFeatureMeta(
-        self: *const Tensor, other: *Tensor, self_num_batch_dims: i64
+        self: *const Tensor, other: *const Tensor, self_num_batch_dims: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__new_zeros_with_same_feature_meta(@ptrCast(&c_tensors), self.c_tensor,
@@ -3547,7 +3783,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNewZerosWithSameFeatureMetaOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor, self_num_batch_dims: i64
+        self: *const Tensor, out: *const Tensor, other: *const Tensor, self_num_batch_dims: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__new_zeros_with_same_feature_meta_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3567,7 +3803,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNnpackSpatialConvolution(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, padding: []i64, stride_: []i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nnpack_spatial_convolution(@ptrCast(&c_tensors), self.c_tensor,
@@ -3580,7 +3816,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalNnpackSpatialConvolutionOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, bias: ?*Tensor, padding: []i64, stride_: []i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nnpack_spatial_convolution_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3602,7 +3838,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalPackPaddedSequence(
-        self: *const Tensor, lengths: *Tensor, batch_first: bool
+        self: *const Tensor, lengths: *const Tensor, batch_first: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__pack_padded_sequence(@ptrCast(&c_tensors), self.c_tensor,
@@ -3613,7 +3849,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalPackPaddedSequenceBackward(
-        gradient: *Tensor, input_size: []i64, batch_sizes: *Tensor, batch_first: bool
+        gradient: *const Tensor, input_size: []i64, batch_sizes: *const Tensor, batch_first: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__pack_padded_sequence_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -3625,7 +3861,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalPackPaddedSequenceOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, lengths: *Tensor, batch_first: bool
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, lengths: *const Tensor, batch_first: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__pack_padded_sequence_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -3660,7 +3896,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalPadPackedSequence(
-        data_: *Tensor, batch_sizes: *Tensor, batch_first: bool, padding_value: Scalar, total_length: i64
+        data_: *const Tensor, batch_sizes: *const Tensor, batch_first: bool, padding_value: Scalar, total_length: i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__pad_packed_sequence(@ptrCast(&c_tensors), data_.c_tensor,
@@ -3673,7 +3909,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalPdistBackward(
-        self: *const Tensor, gradient: *Tensor, p: f64, pdist_: *Tensor
+        self: *const Tensor, gradient: *const Tensor, p: f64, pdist_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__pdist_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -3685,7 +3921,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalPdistBackwardOut(
-        self: *const Tensor, out: *Tensor, gradient: *Tensor, p: f64, pdist_: *Tensor
+        self: *const Tensor, out: *const Tensor, gradient: *const Tensor, p: f64, pdist_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__pdist_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3708,7 +3944,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalPinMemoryOut(
-        self: *const Tensor, out: *Tensor, device_: Device
+        self: *const Tensor, out: *const Tensor, device_: Device
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__pin_memory_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3719,7 +3955,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalPreluKernel(
-        self: *const Tensor, weight: *Tensor
+        self: *const Tensor, weight: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__prelu_kernel(@ptrCast(&c_tensors), self.c_tensor,
@@ -3729,7 +3965,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalPreluKernelBackward(
-        self: *const Tensor, grad_output: *Tensor, weight: *Tensor
+        self: *const Tensor, grad_output: *const Tensor, weight: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__prelu_kernel_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -3740,7 +3976,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalPrint(
-        s: []u8
+        s: []const u8
     ) void {
         __c.atg__print(s.ptr, s.len);
         torch.readAndCleanError();
@@ -3748,7 +3984,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalPropagateXlaData(
-        self: *const Tensor, output: *Tensor
+        self: *const Tensor, output: *const Tensor
     ) void {
         __c.atg__propagate_xla_data(self.c_tensor,
                 output.c_tensor);
@@ -3791,7 +4027,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalReshapeAliasCopyOut(
-        self: *const Tensor, out: *Tensor, size_: []i64, stride_: []i64
+        self: *const Tensor, out: *const Tensor, size_: []i64, stride_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__reshape_alias_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3813,7 +4049,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalReshapeFromTensor(
-        self: *const Tensor, shape: *Tensor
+        self: *const Tensor, shape: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__reshape_from_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -3845,7 +4081,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalResizeOutputOut(
-        self: *const Tensor, out: *Tensor, size_: []i64, device_: Device
+        self: *const Tensor, out: *const Tensor, size_: []i64, device_: Device
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__resize_output_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3857,7 +4093,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalRowwisePrune(
-        weight: *Tensor, mask: *Tensor, compressed_indices_dtype: Kind
+        weight: *const Tensor, mask: *const Tensor, compressed_indices_dtype: Kind
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__rowwise_prune(@ptrCast(&c_tensors), weight.c_tensor,
@@ -3877,7 +4113,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSampleDirichletOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sample_dirichlet_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -3887,7 +4123,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSaturateWeightToFp16(
-        weight: *Tensor
+        weight: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__saturate_weight_to_fp16(@ptrCast(&c_tensors), weight.c_tensor);
@@ -3896,7 +4132,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalScaledDotProductAttentionMath(
-        query: *Tensor, key: *Tensor, value: *Tensor, attn_mask: ?*Tensor, dropout_p: f64, is_causal: bool, dropout_mask: ?*Tensor, scale: ?f64
+        query: *const Tensor, key: *const Tensor, value: *const Tensor, attn_mask: ?*const Tensor, dropout_p: f64, is_causal: bool, dropout_mask: ?*const Tensor, scale: ?f64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__scaled_dot_product_attention_math(@ptrCast(&c_tensors), query.c_tensor,
@@ -3912,7 +4148,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalScaledDotProductCudnnAttention(
-        query: *Tensor, key: *Tensor, value: *Tensor, dropout_p: f64, is_causal: bool, return_debug_mask: bool, scale: ?f64
+        query: *const Tensor, key: *const Tensor, value: *const Tensor, dropout_p: f64, is_causal: bool, return_debug_mask: bool, scale: ?f64
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg__scaled_dot_product_cudnn_attention(@ptrCast(&c_tensors), query.c_tensor,
@@ -3927,7 +4163,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalScaledDotProductEfficientAttention(
-        query: *Tensor, key: *Tensor, value: *Tensor, attn_bias: ?*Tensor, compute_log_sumexp: bool, dropout_p: f64, is_causal: bool, scale: ?f64
+        query: *const Tensor, key: *const Tensor, value: *const Tensor, attn_bias: ?*const Tensor, compute_log_sumexp: bool, dropout_p: f64, is_causal: bool, scale: ?f64
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg__scaled_dot_product_efficient_attention(@ptrCast(&c_tensors), query.c_tensor,
@@ -3943,7 +4179,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalScaledDotProductFlashAttentionBackward(
-        grad_out: *Tensor, query: *Tensor, key: *Tensor, value: *Tensor, out: *Tensor, logsumexp_: *Tensor, cum_seq_q: *Tensor, cum_seq_k: *Tensor, max_q: i64, max_k: i64, dropout_p: f64, is_causal: bool, philox_seed: *Tensor, philox_offset: *Tensor, scale: ?f64
+        grad_out: *const Tensor, query: *const Tensor, key: *const Tensor, value: *const Tensor, out: *const Tensor, logsumexp_: *const Tensor, cum_seq_q: *const Tensor, cum_seq_k: *const Tensor, max_q: i64, max_k: i64, dropout_p: f64, is_causal: bool, philox_seed: *const Tensor, philox_offset: *const Tensor, scale: ?f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__scaled_dot_product_flash_attention_backward(@ptrCast(&c_tensors), grad_out.c_tensor,
@@ -3966,7 +4202,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalScaledDotProductFlashAttentionForCpu(
-        query: *Tensor, key: *Tensor, value: *Tensor, dropout_p: f64, is_causal: bool, attn_mask: ?*Tensor, scale: ?f64
+        query: *const Tensor, key: *const Tensor, value: *const Tensor, dropout_p: f64, is_causal: bool, attn_mask: ?*const Tensor, scale: ?f64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__scaled_dot_product_flash_attention_for_cpu(@ptrCast(&c_tensors), query.c_tensor,
@@ -3981,7 +4217,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalScaledDotProductFlashAttentionForCpuBackward(
-        grad_out: *Tensor, query: *Tensor, key: *Tensor, value: *Tensor, out: *Tensor, logsumexp_: *Tensor, dropout_p: f64, is_causal: bool, attn_mask: ?*Tensor, scale: ?f64
+        grad_out: *const Tensor, query: *const Tensor, key: *const Tensor, value: *const Tensor, out: *const Tensor, logsumexp_: *const Tensor, dropout_p: f64, is_causal: bool, attn_mask: ?*const Tensor, scale: ?f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__scaled_dot_product_flash_attention_for_cpu_backward(@ptrCast(&c_tensors), grad_out.c_tensor,
@@ -3999,7 +4235,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalScaledMm(
-        self: *const Tensor, mat2: *Tensor, bias: ?*Tensor, out_dtype: ?Kind, scale_a: ?*Tensor, scale_b: ?*Tensor, scale_result: ?*Tensor, use_fast_accum: bool
+        self: *const Tensor, mat2: *const Tensor, bias: ?*const Tensor, out_dtype: ?Kind, scale_a: ?*const Tensor, scale_b: ?*const Tensor, scale_result: ?*const Tensor, use_fast_accum: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__scaled_mm(@ptrCast(&c_tensors), self.c_tensor,
@@ -4015,7 +4251,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalScaledMmOut(
-        self: *const Tensor, out: *Tensor, out_amax: *Tensor, mat2: *Tensor, bias: ?*Tensor, out_dtype: ?Kind, scale_a: ?*Tensor, scale_b: ?*Tensor, scale_result: ?*Tensor, use_fast_accum: bool
+        self: *const Tensor, out: *const Tensor, out_amax: *const Tensor, mat2: *const Tensor, bias: ?*const Tensor, out_dtype: ?Kind, scale_a: ?*const Tensor, scale_b: ?*const Tensor, scale_result: ?*const Tensor, use_fast_accum: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__scaled_mm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4033,7 +4269,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalScatterReduce(
-        self: *const Tensor, dim_: i64, index_: *Tensor, src: *Tensor, reduce: []u8, include_self: bool
+        self: *const Tensor, dim_: i64, index_: *const Tensor, src: *const Tensor, reduce: []const u8, include_self: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__scatter_reduce(@ptrCast(&c_tensors), self.c_tensor,
@@ -4047,7 +4283,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalScatterReduce_(
-        self: *Tensor, dim_: i64, index_: *Tensor, src: *Tensor, reduce: []u8, include_self: bool
+        self: *Tensor, dim_: i64, index_: *const Tensor, src: *const Tensor, reduce: []const u8, include_self: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__scatter_reduce_(@ptrCast(&c_tensors), self.c_tensor,
@@ -4061,7 +4297,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalScatterReduceTwoOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, index_: *Tensor, src: *Tensor, reduce: []u8, include_self: bool
+        self: *const Tensor, out: *const Tensor, dim_: i64, index_: *const Tensor, src: *const Tensor, reduce: []const u8, include_self: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__scatter_reduce_two_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4076,7 +4312,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSegmentReduceBackward(
-        gradient: *Tensor, output: *Tensor, data_: *Tensor, reduce: []u8, lengths: ?*Tensor, offsets: ?*Tensor, axis: i64, initial: Scalar
+        gradient: *const Tensor, output: *const Tensor, data_: *const Tensor, reduce: []const u8, lengths: ?*const Tensor, offsets: ?*const Tensor, axis: i64, initial: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__segment_reduce_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -4092,7 +4328,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSegmentReduceBackwardOut(
-        out: *Tensor, gradient: *Tensor, output: *Tensor, data_: *Tensor, reduce: []u8, lengths: ?*Tensor, offsets: ?*Tensor, axis: i64, initial: Scalar
+        out: *const Tensor, gradient: *const Tensor, output: *const Tensor, data_: *const Tensor, reduce: []const u8, lengths: ?*const Tensor, offsets: ?*const Tensor, axis: i64, initial: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__segment_reduce_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4118,7 +4354,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSlowConv2dBackward(
-        self: *const Tensor, grad_input: *Tensor, grad_weight: *Tensor, grad_bias: *Tensor, grad_output: *Tensor, weight: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64
+        self: *const Tensor, grad_input: *const Tensor, grad_weight: *const Tensor, grad_bias: *const Tensor, grad_output: *const Tensor, weight: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__slow_conv2d_backward(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -4135,7 +4371,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSobolEngineDraw(
-        quasi: *Tensor, n: i64, sobolstate: *Tensor, dimension: i64, num_generated: i64, dtype: ?Kind
+        quasi: *const Tensor, n: i64, sobolstate: *const Tensor, dimension: i64, num_generated: i64, dtype: ?Kind
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__sobol_engine_draw(@ptrCast(&c_tensors), quasi.c_tensor,
@@ -4149,7 +4385,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSobolEngineFf_(
-        self: *Tensor, n: i64, sobolstate: *Tensor, dimension: i64, num_generated: i64
+        self: *Tensor, n: i64, sobolstate: *const Tensor, dimension: i64, num_generated: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sobol_engine_ff_(@ptrCast(&c_tensors), self.c_tensor,
@@ -4172,7 +4408,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSobolEngineScramble_(
-        self: *Tensor, ltm: *Tensor, dimension: i64
+        self: *Tensor, ltm: *const Tensor, dimension: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sobol_engine_scramble_(@ptrCast(&c_tensors), self.c_tensor,
@@ -4194,7 +4430,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSoftmaxBackwardData(
-        grad_output: *Tensor, output: *Tensor, dim_: i64, input_dtype: Kind
+        grad_output: *const Tensor, output: *const Tensor, dim_: i64, input_dtype: Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__softmax_backward_data(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -4206,7 +4442,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSoftmaxBackwardDataOut(
-        grad_input: *Tensor, grad_output: *Tensor, output: *Tensor, dim_: i64, input_dtype: Kind
+        grad_input: *const Tensor, grad_output: *const Tensor, output: *const Tensor, dim_: i64, input_dtype: Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__softmax_backward_data_out(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -4219,7 +4455,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSoftmaxOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, half_to_float: bool
+        self: *const Tensor, out: *const Tensor, dim_: i64, half_to_float: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__softmax_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4231,7 +4467,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseAddmm(
-        self: *const Tensor, mat1: *Tensor, mat2: *Tensor
+        self: *const Tensor, mat1: *const Tensor, mat2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_addmm(@ptrCast(&c_tensors), self.c_tensor,
@@ -4242,7 +4478,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseAddmmOut(
-        self: *const Tensor, out: *Tensor, mat1: *Tensor, mat2: *Tensor
+        self: *const Tensor, out: *const Tensor, mat1: *const Tensor, mat2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_addmm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4274,7 +4510,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseBroadcastToCopyOut(
-        self: *const Tensor, out: *Tensor, size_: []i64
+        self: *const Tensor, out: *const Tensor, size_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_broadcast_to_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4285,71 +4521,71 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseBscTensorUnsafe(
-        ccol_indices_: *Tensor, row_indices_: *Tensor, values_: *Tensor, size_: []i64, options: TensorOptions
+        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_bsc_tensor_unsafe(@ptrCast(&c_tensors), ccol_indices_.c_tensor,
                 row_indices_.c_tensor,
                 values_.c_tensor,
                 size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseBsrTensorUnsafe(
-        crow_indices_: *Tensor, col_indices_: *Tensor, values_: *Tensor, size_: []i64, options: TensorOptions
+        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_bsr_tensor_unsafe(@ptrCast(&c_tensors), crow_indices_.c_tensor,
                 col_indices_.c_tensor,
                 values_.c_tensor,
                 size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseCompressedTensorUnsafe(
-        compressed_indices: *Tensor, plain_indices: *Tensor, values_: *Tensor, size_: []i64, options: TensorOptions
+        compressed_indices: *const Tensor, plain_indices: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_compressed_tensor_unsafe(@ptrCast(&c_tensors), compressed_indices.c_tensor,
                 plain_indices.c_tensor,
                 values_.c_tensor,
                 size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseCooTensorUnsafe(
-        indices_: *Tensor, values_: *Tensor, size_: []i64, options: TensorOptions, is_coalesced_: bool
+        indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions, is_coalesced_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_coo_tensor_unsafe(@ptrCast(&c_tensors), indices_.c_tensor,
                 values_.c_tensor,
                 size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt(),
+                options_.kind.cInt(), options_.device.cInt(),
                 if (is_coalesced_)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseCooTensorWithDims(
-        sparse_dim_: i64, dense_dim_: i64, size_: []i64, options: TensorOptions
+        sparse_dim_: i64, dense_dim_: i64, size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_coo_tensor_with_dims(@ptrCast(&c_tensors), sparse_dim_,
                 dense_dim_,
                 size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseCooTensorWithDimsAndTensors(
-        sparse_dim_: i64, dense_dim_: i64, size_: []i64, indices_: *Tensor, values_: *Tensor, options: TensorOptions, is_coalesced_: bool
+        sparse_dim_: i64, dense_dim_: i64, size_: []i64, indices_: *const Tensor, values_: *const Tensor, options_: TensorOptions, is_coalesced_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_coo_tensor_with_dims_and_tensors(@ptrCast(&c_tensors), sparse_dim_,
@@ -4357,14 +4593,14 @@ pub const Tensor = struct {
                 size_.ptr, @intCast(size_.len),
                 indices_.c_tensor,
                 values_.c_tensor,
-                options.kind.cInt(), options.device.cInt(),
+                options_.kind.cInt(), options_.device.cInt(),
                 if (is_coalesced_)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseCooTensorWithDimsAndTensorsOut(
-        out: *Tensor, sparse_dim_: i64, dense_dim_: i64, size_: []i64, indices_: *Tensor, values_: *Tensor, is_coalesced_: bool
+        out: *const Tensor, sparse_dim_: i64, dense_dim_: i64, size_: []i64, indices_: *const Tensor, values_: *const Tensor, is_coalesced_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_coo_tensor_with_dims_and_tensors_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4379,7 +4615,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseCooTensorWithDimsOut(
-        out: *Tensor, sparse_dim_: i64, dense_dim_: i64, size_: []i64
+        out: *const Tensor, sparse_dim_: i64, dense_dim_: i64, size_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_coo_tensor_with_dims_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4391,14 +4627,14 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseCscTensorUnsafe(
-        ccol_indices_: *Tensor, row_indices_: *Tensor, values_: *Tensor, size_: []i64, options: TensorOptions
+        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_csc_tensor_unsafe(@ptrCast(&c_tensors), ccol_indices_.c_tensor,
                 row_indices_.c_tensor,
                 values_.c_tensor,
                 size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -4416,7 +4652,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseCsrProdDimDtypeOut(
-        self: *const Tensor, out: *Tensor, dim_: []i64, keepdim: bool, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, dim_: []i64, keepdim: bool, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_csr_prod_dim_dtype_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4441,7 +4677,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseCsrSumDimDtypeOut(
-        self: *const Tensor, out: *Tensor, dim_: []i64, keepdim: bool, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, dim_: []i64, keepdim: bool, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_csr_sum_dim_dtype_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4454,14 +4690,14 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseCsrTensorUnsafe(
-        crow_indices_: *Tensor, col_indices_: *Tensor, values_: *Tensor, size_: []i64, options: TensorOptions
+        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_csr_tensor_unsafe(@ptrCast(&c_tensors), crow_indices_.c_tensor,
                 col_indices_.c_tensor,
                 values_.c_tensor,
                 size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -4478,7 +4714,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseLogSoftmaxBackwardData(
-        self: *const Tensor, grad_output: *Tensor, output: *Tensor, dim_: i64
+        self: *const Tensor, grad_output: *const Tensor, output: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_log_softmax_backward_data(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -4490,7 +4726,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseLogSoftmaxBackwardDataOut(
-        self: *const Tensor, out: *Tensor, grad_output: *Tensor, output: *Tensor, dim_: i64
+        self: *const Tensor, out: *const Tensor, grad_output: *const Tensor, output: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_log_softmax_backward_data_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4514,7 +4750,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseLogSoftmaxOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, half_to_float: bool
+        self: *const Tensor, out: *const Tensor, dim_: i64, half_to_float: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_log_softmax_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4526,7 +4762,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseMaskProjection(
-        self: *const Tensor, mask: *Tensor, accumulate_matches: bool
+        self: *const Tensor, mask: *const Tensor, accumulate_matches: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_mask_projection(@ptrCast(&c_tensors), self.c_tensor,
@@ -4537,7 +4773,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseMaskProjectionOut(
-        self: *const Tensor, out: *Tensor, mask: *Tensor, accumulate_matches: bool
+        self: *const Tensor, out: *const Tensor, mask: *const Tensor, accumulate_matches: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_mask_projection_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4549,7 +4785,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseMm(
-        sparse: *Tensor, dense: *Tensor
+        sparse: *const Tensor, dense: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_mm(@ptrCast(&c_tensors), sparse.c_tensor,
@@ -4559,7 +4795,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseMmReduce(
-        sparse: *Tensor, dense: *Tensor, reduce: []u8
+        sparse: *const Tensor, dense: *const Tensor, reduce: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_mm_reduce(@ptrCast(&c_tensors), sparse.c_tensor,
@@ -4570,7 +4806,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseMmReduceImpl(
-        self: *const Tensor, other: *Tensor, reduce: []u8
+        self: *const Tensor, other: *const Tensor, reduce: []const u8
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__sparse_mm_reduce_impl(@ptrCast(&c_tensors), self.c_tensor,
@@ -4581,7 +4817,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseSemiStructuredLinear(
-        self: *const Tensor, weight: *Tensor, meta: *Tensor, bias: ?*Tensor, activation: []u8, out_dtype: ?Kind
+        self: *const Tensor, weight: *const Tensor, meta: *const Tensor, bias: ?*const Tensor, activation: []const u8, out_dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_semi_structured_linear(@ptrCast(&c_tensors), self.c_tensor,
@@ -4606,7 +4842,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseSoftmaxBackwardData(
-        self: *const Tensor, grad_output: *Tensor, output: *Tensor, dim_: i64
+        self: *const Tensor, grad_output: *const Tensor, output: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_softmax_backward_data(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -4618,7 +4854,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseSoftmaxBackwardDataOut(
-        self: *const Tensor, out: *Tensor, grad_output: *Tensor, output: *Tensor, dim_: i64
+        self: *const Tensor, out: *const Tensor, grad_output: *const Tensor, output: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_softmax_backward_data_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4642,7 +4878,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseSoftmaxOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, half_to_float: bool
+        self: *const Tensor, out: *const Tensor, dim_: i64, half_to_float: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_softmax_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4654,7 +4890,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseSparseMatmul(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_sparse_matmul(@ptrCast(&c_tensors), self.c_tensor,
@@ -4664,7 +4900,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseSparseMatmulOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_sparse_matmul_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4684,7 +4920,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseSumBackward(
-        self: *const Tensor, gradient: *Tensor, dim_: []i64
+        self: *const Tensor, gradient: *const Tensor, dim_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_sum_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -4695,7 +4931,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseSumBackwardOut(
-        self: *const Tensor, out: *Tensor, gradient: *Tensor, dim_: []i64
+        self: *const Tensor, out: *const Tensor, gradient: *const Tensor, dim_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_sum_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4728,7 +4964,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseSumDimOut(
-        self: *const Tensor, out: *Tensor, dim_: []i64
+        self: *const Tensor, out: *const Tensor, dim_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_sum_dim_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4749,7 +4985,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSpdiags(
-        diagonals: *Tensor, offsets: *Tensor, shape: []i64, layout: ?Layout
+        diagonals: *const Tensor, offsets: *const Tensor, shape: []i64, layout: ?Layout
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__spdiags(@ptrCast(&c_tensors), diagonals.c_tensor,
@@ -4761,7 +4997,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSpdiagsOut(
-        out: *Tensor, diagonals: *Tensor, offsets: *Tensor, shape: []i64, layout: ?Layout
+        out: *const Tensor, diagonals: *const Tensor, offsets: *const Tensor, shape: []i64, layout: ?Layout
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__spdiags_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4774,7 +5010,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalStack(
-        tensors: []*Tensor, dim_: i64
+        tensors: []*const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__stack(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len),
@@ -4784,7 +5020,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalStackOut(
-        out: *Tensor, tensors: []*Tensor, dim_: i64
+        out: *const Tensor, tensors: []*const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__stack_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4804,7 +5040,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalStandardGammaGrad(
-        self: *const Tensor, output: *Tensor
+        self: *const Tensor, output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__standard_gamma_grad(@ptrCast(&c_tensors), self.c_tensor,
@@ -4814,7 +5050,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalStandardGammaGradOut(
-        self: *const Tensor, out: *Tensor, output: *Tensor
+        self: *const Tensor, out: *const Tensor, output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__standard_gamma_grad_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4825,7 +5061,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalStandardGammaOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__standard_gamma_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4835,7 +5071,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTestAmbiguousDefaults(
-        dummy: *Tensor, a: i64, b: i64
+        dummy: *const Tensor, a: i64, b: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_ambiguous_defaults(@ptrCast(&c_tensors), dummy.c_tensor,
@@ -4846,7 +5082,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTestAmbiguousDefaultsB(
-        dummy: *Tensor, a: i64, b: []u8
+        dummy: *const Tensor, a: i64, b: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_ambiguous_defaults_b(@ptrCast(&c_tensors), dummy.c_tensor,
@@ -4866,7 +5102,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTestAutogradMultipleDispatchFullcoverageOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_autograd_multiple_dispatch_fullcoverage_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4904,7 +5140,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTestAutogradMultipleDispatchViewCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_autograd_multiple_dispatch_view_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4923,7 +5159,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTestFunctorchFallback(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_functorch_fallback(@ptrCast(&c_tensors), self.c_tensor,
@@ -4933,7 +5169,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTestFunctorchFallbackOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_functorch_fallback_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4944,7 +5180,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTestOptionalFilledIntlist(
-        values_: *Tensor, addends: ?[]i64
+        values_: *const Tensor, addends: ?[]i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_optional_filled_intlist(@ptrCast(&c_tensors), values_.c_tensor,
@@ -4954,7 +5190,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTestOptionalFilledIntlistOut(
-        out: *Tensor, values_: *Tensor, addends: ?[]i64
+        out: *const Tensor, values_: *const Tensor, addends: ?[]i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_optional_filled_intlist_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4965,7 +5201,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTestOptionalFloatlist(
-        values_: *Tensor, addends: []f64
+        values_: *const Tensor, addends: []f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_optional_floatlist(@ptrCast(&c_tensors), values_.c_tensor,
@@ -4975,7 +5211,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTestOptionalFloatlistOut(
-        out: *Tensor, values_: *Tensor, addends: []f64
+        out: *const Tensor, values_: *const Tensor, addends: []f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_optional_floatlist_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -4986,7 +5222,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTestOptionalIntlist(
-        values_: *Tensor, addends: ?[]i64
+        values_: *const Tensor, addends: ?[]i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_optional_intlist(@ptrCast(&c_tensors), values_.c_tensor,
@@ -4996,7 +5232,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTestOptionalIntlistOut(
-        out: *Tensor, values_: *Tensor, addends: ?[]i64
+        out: *const Tensor, values_: *const Tensor, addends: ?[]i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_optional_intlist_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5018,7 +5254,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTestSerializationSubcmul(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_serialization_subcmul(@ptrCast(&c_tensors), self.c_tensor,
@@ -5028,7 +5264,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTestStringDefault(
-        dummy: *Tensor, a: []u8, b: []u8
+        dummy: *const Tensor, a: []const u8, b: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_string_default(@ptrCast(&c_tensors), dummy.c_tensor,
@@ -5048,7 +5284,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTestWarnInAutogradOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_warn_in_autograd_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5058,18 +5294,18 @@ pub const Tensor = struct {
     }
 
     pub fn internalToCopy(
-        self: *const Tensor, options: TensorOptions, non_blocking: bool
+        self: *const Tensor, options_: TensorOptions, non_blocking: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_copy(@ptrCast(&c_tensors), self.c_tensor,
-                options.kind.cInt(), options.device.cInt(),
+                options_.kind.cInt(), options_.device.cInt(),
                 if (non_blocking)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalToCopyOut(
-        self: *const Tensor, out: *Tensor, non_blocking: bool
+        self: *const Tensor, out: *const Tensor, non_blocking: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5080,16 +5316,16 @@ pub const Tensor = struct {
     }
 
     pub fn internalToCpu(
-        tensors: []*Tensor
+        tensors: []*const Tensor
     ) []Tensor {
         const c_tensors = __c.atg__to_cpu(ptrList(tensors).ptr, @intCast(tensors.len));
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
@@ -5106,7 +5342,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalToDenseOut(
-        self: *const Tensor, out: *Tensor, dtype: ?Kind, masked_grad: bool
+        self: *const Tensor, out: *const Tensor, dtype: ?Kind, masked_grad: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_dense_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5141,7 +5377,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalToSparseBscOut(
-        self: *const Tensor, out: *Tensor, blocksize: []i64, dense_dim_: ?i64
+        self: *const Tensor, out: *const Tensor, blocksize: []i64, dense_dim_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_sparse_bsc_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5164,7 +5400,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalToSparseBsrOut(
-        self: *const Tensor, out: *Tensor, blocksize: []i64, dense_dim_: ?i64
+        self: *const Tensor, out: *const Tensor, blocksize: []i64, dense_dim_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_sparse_bsr_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5186,7 +5422,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalToSparseCscOut(
-        self: *const Tensor, out: *Tensor, dense_dim_: ?i64
+        self: *const Tensor, out: *const Tensor, dense_dim_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_sparse_csc_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5207,7 +5443,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalToSparseCsrOut(
-        self: *const Tensor, out: *Tensor, dense_dim_: ?i64
+        self: *const Tensor, out: *const Tensor, dense_dim_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_sparse_csr_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5218,7 +5454,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalToSparseOut(
-        self: *const Tensor, out: *Tensor, layout: ?Layout, blocksize: ?[]i64, dense_dim_: ?i64
+        self: *const Tensor, out: *const Tensor, layout: ?Layout, blocksize: ?[]i64, dense_dim_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_sparse_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5231,7 +5467,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalToSparseSemiStructured(
-        dense: *Tensor
+        dense: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__to_sparse_semi_structured(@ptrCast(&c_tensors), dense.c_tensor);
@@ -5250,7 +5486,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalToSparseSparseDimOut(
-        self: *const Tensor, out: *Tensor, sparse_dim_: i64
+        self: *const Tensor, out: *const Tensor, sparse_dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_sparse_sparse_dim_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5261,7 +5497,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTransformBiasRescaleQkv(
-        qkv: *Tensor, qkv_bias: *Tensor, num_heads: i64
+        qkv: *const Tensor, qkv_bias: *const Tensor, num_heads: i64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__transform_bias_rescale_qkv(@ptrCast(&c_tensors), qkv.c_tensor,
@@ -5272,7 +5508,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTransformBiasRescaleQkvOut(
-        out0: *Tensor, out1: *Tensor, out2: *Tensor, qkv: *Tensor, qkv_bias: *Tensor, num_heads: i64
+        out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, qkv: *const Tensor, qkv_bias: *const Tensor, num_heads: i64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__transform_bias_rescale_qkv_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -5286,7 +5522,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTransformerEncoderLayerFwd(
-        src: *Tensor, embed_dim: i64, num_heads: i64, qkv_weight: *Tensor, qkv_bias: *Tensor, proj_weight: *Tensor, proj_bias: *Tensor, use_gelu: bool, norm_first: bool, eps: f64, norm_weight_1: *Tensor, norm_bias_1: *Tensor, norm_weight_2: *Tensor, norm_bias_2: *Tensor, ffn_weight_1: *Tensor, ffn_bias_1: *Tensor, ffn_weight_2: *Tensor, ffn_bias_2: *Tensor, mask: ?*Tensor, mask_type: ?i64
+        src: *const Tensor, embed_dim: i64, num_heads: i64, qkv_weight: *const Tensor, qkv_bias: *const Tensor, proj_weight: *const Tensor, proj_bias: *const Tensor, use_gelu: bool, norm_first: bool, eps: f64, norm_weight_1: *const Tensor, norm_bias_1: *const Tensor, norm_weight_2: *const Tensor, norm_bias_2: *const Tensor, ffn_weight_1: *const Tensor, ffn_bias_1: *const Tensor, ffn_weight_2: *const Tensor, ffn_bias_2: *const Tensor, mask: ?*const Tensor, mask_type: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__transformer_encoder_layer_fwd(@ptrCast(&c_tensors), src.c_tensor,
@@ -5314,7 +5550,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTransformerEncoderLayerFwdOut(
-        out: *Tensor, src: *Tensor, embed_dim: i64, num_heads: i64, qkv_weight: *Tensor, qkv_bias: *Tensor, proj_weight: *Tensor, proj_bias: *Tensor, use_gelu: bool, norm_first: bool, eps: f64, norm_weight_1: *Tensor, norm_bias_1: *Tensor, norm_weight_2: *Tensor, norm_bias_2: *Tensor, ffn_weight_1: *Tensor, ffn_bias_1: *Tensor, ffn_weight_2: *Tensor, ffn_bias_2: *Tensor, mask: ?*Tensor, mask_type: ?i64
+        out: *const Tensor, src: *const Tensor, embed_dim: i64, num_heads: i64, qkv_weight: *const Tensor, qkv_bias: *const Tensor, proj_weight: *const Tensor, proj_bias: *const Tensor, use_gelu: bool, norm_first: bool, eps: f64, norm_weight_1: *const Tensor, norm_bias_1: *const Tensor, norm_weight_2: *const Tensor, norm_bias_2: *const Tensor, ffn_weight_1: *const Tensor, ffn_bias_1: *const Tensor, ffn_weight_2: *const Tensor, ffn_bias_2: *const Tensor, mask: ?*const Tensor, mask_type: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__transformer_encoder_layer_fwd_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5343,7 +5579,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTrilinear(
-        i1_: *Tensor, i2_: *Tensor, i3_: *Tensor, expand1: []i64, expand2: []i64, expand3: []i64, sumdim: []i64, unroll_dim: i64
+        i1_: *const Tensor, i2_: *const Tensor, i3_: *const Tensor, expand1: []i64, expand2: []i64, expand3: []i64, sumdim: []i64, unroll_dim: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__trilinear(@ptrCast(&c_tensors), i1_.c_tensor,
@@ -5359,7 +5595,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTrilinearOut(
-        out: *Tensor, i1_: *Tensor, i2_: *Tensor, i3_: *Tensor, expand1: []i64, expand2: []i64, expand3: []i64, sumdim: []i64, unroll_dim: i64
+        out: *const Tensor, i1_: *const Tensor, i2_: *const Tensor, i3_: *const Tensor, expand1: []i64, expand2: []i64, expand3: []i64, sumdim: []i64, unroll_dim: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__trilinear_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5376,7 +5612,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTritonMultiHeadAttention(
-        query: *Tensor, key: *Tensor, value: *Tensor, embed_dim: i64, num_head: i64, qkv_weight: *Tensor, qkv_bias: *Tensor, proj_weight: *Tensor, proj_bias: *Tensor, mask: ?*Tensor
+        query: *const Tensor, key: *const Tensor, value: *const Tensor, embed_dim: i64, num_head: i64, qkv_weight: *const Tensor, qkv_bias: *const Tensor, proj_weight: *const Tensor, proj_bias: *const Tensor, mask: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__triton_multi_head_attention(@ptrCast(&c_tensors), query.c_tensor,
@@ -5394,7 +5630,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTritonMultiHeadAttentionOut(
-        out: *Tensor, query: *Tensor, key: *Tensor, value: *Tensor, embed_dim: i64, num_head: i64, qkv_weight: *Tensor, qkv_bias: *Tensor, proj_weight: *Tensor, proj_bias: *Tensor, mask: ?*Tensor
+        out: *const Tensor, query: *const Tensor, key: *const Tensor, value: *const Tensor, embed_dim: i64, num_head: i64, qkv_weight: *const Tensor, qkv_bias: *const Tensor, proj_weight: *const Tensor, proj_bias: *const Tensor, mask: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__triton_multi_head_attention_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5413,7 +5649,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTritonScaledDotAttention(
-        q: *Tensor, k: *Tensor, v: *Tensor, dropout_p: f64
+        q: *const Tensor, k: *const Tensor, v: *const Tensor, dropout_p: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__triton_scaled_dot_attention(@ptrCast(&c_tensors), q.c_tensor,
@@ -5425,7 +5661,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalTritonScaledDotAttentionOut(
-        out: *Tensor, q: *Tensor, k: *Tensor, v: *Tensor, dropout_p: f64
+        out: *const Tensor, q: *const Tensor, k: *const Tensor, v: *const Tensor, dropout_p: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__triton_scaled_dot_attention_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5461,7 +5697,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUnique2Out(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, out2: *Tensor, sorted: bool, return_inverse: bool, return_counts: bool
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, sorted: bool, return_inverse: bool, return_counts: bool
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__unique2_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -5476,7 +5712,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUniqueOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, sorted: bool, return_inverse: bool
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, sorted: bool, return_inverse: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__unique_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -5489,7 +5725,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUnpackDual(
-        dual: *Tensor, level: i64
+        dual: *const Tensor, level: i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__unpack_dual(@ptrCast(&c_tensors), dual.c_tensor,
@@ -5499,7 +5735,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUnsafeIndex(
-        self: *const Tensor, indices_: []?*Tensor
+        self: *const Tensor, indices_: []?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__unsafe_index(@ptrCast(&c_tensors), self.c_tensor,
@@ -5509,7 +5745,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUnsafeIndexPut(
-        self: *const Tensor, indices_: []?*Tensor, values_: *Tensor, accumulate: bool
+        self: *const Tensor, indices_: []?*const Tensor, values_: *const Tensor, accumulate: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__unsafe_index_put(@ptrCast(&c_tensors), self.c_tensor,
@@ -5531,7 +5767,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUnsafeViewOut(
-        self: *const Tensor, out: *Tensor, size_: []i64
+        self: *const Tensor, out: *const Tensor, size_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__unsafe_view_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5555,7 +5791,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUpsampleBicubic2dAaBackward(
-        grad_output: *Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_bicubic2d_aa_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -5569,7 +5805,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUpsampleBicubic2dAaBackwardGradInput(
-        grad_input: *Tensor, grad_output: *Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_bicubic2d_aa_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -5584,7 +5820,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUpsampleBicubic2dAaOut(
-        self: *const Tensor, out: *Tensor, output_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_bicubic2d_aa_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5623,7 +5859,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUpsampleBilinear2dAaBackward(
-        grad_output: *Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_bilinear2d_aa_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -5637,7 +5873,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUpsampleBilinear2dAaBackwardGradInput(
-        grad_input: *Tensor, grad_output: *Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_bilinear2d_aa_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -5652,7 +5888,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUpsampleBilinear2dAaOut(
-        self: *const Tensor, out: *Tensor, output_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_bilinear2d_aa_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5689,7 +5925,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUpsampleNearestExact1dBackward(
-        grad_output: *Tensor, output_size: []i64, input_size: []i64, scales: ?f64
+        grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact1d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -5701,7 +5937,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUpsampleNearestExact1dBackwardGradInput(
-        grad_input: *Tensor, grad_output: *Tensor, output_size: []i64, input_size: []i64, scales: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact1d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -5714,7 +5950,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUpsampleNearestExact1dOut(
-        self: *const Tensor, out: *Tensor, output_size: []i64, scales: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []i64, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact1d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5749,7 +5985,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUpsampleNearestExact2dBackward(
-        grad_output: *Tensor, output_size: []i64, input_size: []i64, scales_h: ?f64, scales_w: ?f64
+        grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -5762,7 +5998,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUpsampleNearestExact2dBackwardGradInput(
-        grad_input: *Tensor, grad_output: *Tensor, output_size: []i64, input_size: []i64, scales_h: ?f64, scales_w: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -5776,7 +6012,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUpsampleNearestExact2dOut(
-        self: *const Tensor, out: *Tensor, output_size: []i64, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []i64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5813,7 +6049,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUpsampleNearestExact3dBackward(
-        grad_output: *Tensor, output_size: []i64, input_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact3d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -5827,7 +6063,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUpsampleNearestExact3dBackwardGradInput(
-        grad_input: *Tensor, grad_output: *Tensor, output_size: []i64, input_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact3d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -5842,7 +6078,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUpsampleNearestExact3dOut(
-        self: *const Tensor, out: *Tensor, output_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact3d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -5867,7 +6103,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUseCudnnCtcLoss(
-        log_probs: *Tensor, targets: *Tensor, input_lengths: []i64, target_lengths: []i64, blank: i64
+        log_probs: *const Tensor, targets: *const Tensor, input_lengths: []i64, target_lengths: []i64, blank: i64
     ) bool {
         const return_ = __c.atg__use_cudnn_ctc_loss(log_probs.c_tensor,
                 targets.c_tensor,
@@ -5879,7 +6115,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalUseCudnnCtcLossTensor(
-        log_probs: *Tensor, targets: *Tensor, input_lengths: *Tensor, target_lengths: *Tensor, blank: i64
+        log_probs: *const Tensor, targets: *const Tensor, input_lengths: *const Tensor, target_lengths: *const Tensor, blank: i64
     ) bool {
         const return_ = __c.atg__use_cudnn_ctc_loss_tensor(log_probs.c_tensor,
                 targets.c_tensor,
@@ -5899,7 +6135,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalValidateCompressedSparseIndices(
-        is_crow: bool, compressed_idx: *Tensor, plain_idx: *Tensor, cdim: i64, dim_: i64, nnz: i64
+        is_crow: bool, compressed_idx: *const Tensor, plain_idx: *const Tensor, cdim: i64, dim_: i64, nnz: i64
     ) void {
         __c.atg__validate_compressed_sparse_indices(if (is_crow)  1  else  0,
                 compressed_idx.c_tensor,
@@ -5912,7 +6148,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalValidateSparseBscTensorArgs(
-        ccol_indices_: *Tensor, row_indices_: *Tensor, values_: *Tensor, size_: []i64
+        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, size_: []i64
     ) void {
         __c.atg__validate_sparse_bsc_tensor_args(ccol_indices_.c_tensor,
                 row_indices_.c_tensor,
@@ -5923,7 +6159,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalValidateSparseBsrTensorArgs(
-        crow_indices_: *Tensor, col_indices_: *Tensor, values_: *Tensor, size_: []i64
+        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, size_: []i64
     ) void {
         __c.atg__validate_sparse_bsr_tensor_args(crow_indices_.c_tensor,
                 col_indices_.c_tensor,
@@ -5934,7 +6170,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalValidateSparseCompressedTensorArgs(
-        compressed_indices: *Tensor, plain_indices: *Tensor, values_: *Tensor, size_: []i64, layout: Layout
+        compressed_indices: *const Tensor, plain_indices: *const Tensor, values_: *const Tensor, size_: []i64, layout: Layout
     ) void {
         __c.atg__validate_sparse_compressed_tensor_args(compressed_indices.c_tensor,
                 plain_indices.c_tensor,
@@ -5946,7 +6182,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalValidateSparseCscTensorArgs(
-        ccol_indices_: *Tensor, row_indices_: *Tensor, values_: *Tensor, size_: []i64
+        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, size_: []i64
     ) void {
         __c.atg__validate_sparse_csc_tensor_args(ccol_indices_.c_tensor,
                 row_indices_.c_tensor,
@@ -5957,7 +6193,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalValidateSparseCsrTensorArgs(
-        crow_indices_: *Tensor, col_indices_: *Tensor, values_: *Tensor, size_: []i64
+        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, size_: []i64
     ) void {
         __c.atg__validate_sparse_csr_tensor_args(crow_indices_.c_tensor,
                 col_indices_.c_tensor,
@@ -5986,7 +6222,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalValuesCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__values_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6004,7 +6240,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalWeightInt4packMm(
-        self: *const Tensor, mat2: *Tensor, qgroupsize: i64, qscaleandzeros: *Tensor
+        self: *const Tensor, mat2: *const Tensor, qgroupsize: i64, qscaleandzeros: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__weight_int4pack_mm(@ptrCast(&c_tensors), self.c_tensor,
@@ -6016,7 +6252,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalWeightInt8packMm(
-        self: *const Tensor, mat2: *Tensor, scales: *Tensor
+        self: *const Tensor, mat2: *const Tensor, scales: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__weight_int8pack_mm(@ptrCast(&c_tensors), self.c_tensor,
@@ -6027,7 +6263,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalWeightNorm(
-        v: *Tensor, g: *Tensor, dim_: i64
+        v: *const Tensor, g: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__weight_norm(@ptrCast(&c_tensors), v.c_tensor,
@@ -6038,7 +6274,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalWeightNormDifferentiableBackward(
-        grad_w: *Tensor, saved_v: *Tensor, saved_g: *Tensor, saved_norms: *Tensor, dim_: i64
+        grad_w: *const Tensor, saved_v: *const Tensor, saved_g: *const Tensor, saved_norms: *const Tensor, dim_: i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__weight_norm_differentiable_backward(@ptrCast(&c_tensors), grad_w.c_tensor,
@@ -6051,7 +6287,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalWeightNormInterface(
-        v: *Tensor, g: *Tensor, dim_: i64
+        v: *const Tensor, g: *const Tensor, dim_: i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__weight_norm_interface(@ptrCast(&c_tensors), v.c_tensor,
@@ -6062,7 +6298,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalWeightNormInterfaceBackward(
-        grad_w: *Tensor, saved_v: *Tensor, saved_g: *Tensor, saved_norms: *Tensor, dim_: i64
+        grad_w: *const Tensor, saved_v: *const Tensor, saved_g: *const Tensor, saved_norms: *const Tensor, dim_: i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__weight_norm_interface_backward(@ptrCast(&c_tensors), grad_w.c_tensor,
@@ -6075,7 +6311,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalWeightNormInterfaceBackwardOut(
-        out0: *Tensor, out1: *Tensor, grad_w: *Tensor, saved_v: *Tensor, saved_g: *Tensor, saved_norms: *Tensor, dim_: i64
+        out0: *const Tensor, out1: *const Tensor, grad_w: *const Tensor, saved_v: *const Tensor, saved_g: *const Tensor, saved_norms: *const Tensor, dim_: i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__weight_norm_interface_backward_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -6090,7 +6326,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalWeightNormInterfaceOut(
-        out0: *Tensor, out1: *Tensor, v: *Tensor, g: *Tensor, dim_: i64
+        out0: *const Tensor, out1: *const Tensor, v: *const Tensor, g: *const Tensor, dim_: i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__weight_norm_interface_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -6121,7 +6357,7 @@ pub const Tensor = struct {
     }
 
     pub fn absOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_abs_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6149,7 +6385,7 @@ pub const Tensor = struct {
     }
 
     pub fn absoluteOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_absolute_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6177,7 +6413,7 @@ pub const Tensor = struct {
     }
 
     pub fn acosOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_acos_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6205,7 +6441,7 @@ pub const Tensor = struct {
     }
 
     pub fn acoshOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_acosh_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6235,7 +6471,7 @@ pub const Tensor = struct {
     }
 
     pub fn adaptiveAvgPool2dOut(
-        self: *const Tensor, out: *Tensor, output_size: []i64
+        self: *const Tensor, out: *const Tensor, output_size: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_adaptive_avg_pool2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6256,7 +6492,7 @@ pub const Tensor = struct {
     }
 
     pub fn adaptiveAvgPool3dBackward(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_adaptive_avg_pool3d_backward(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -6267,7 +6503,7 @@ pub const Tensor = struct {
     }
 
     pub fn adaptiveAvgPool3dOut(
-        self: *const Tensor, out: *Tensor, output_size: []i64
+        self: *const Tensor, out: *const Tensor, output_size: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_adaptive_avg_pool3d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6298,7 +6534,7 @@ pub const Tensor = struct {
     }
 
     pub fn adaptiveMaxPool2dBackward(
-        self: *const Tensor, grad_output: *Tensor, indices_: *Tensor
+        self: *const Tensor, grad_output: *const Tensor, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_adaptive_max_pool2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -6309,7 +6545,7 @@ pub const Tensor = struct {
     }
 
     pub fn adaptiveMaxPool2dBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, indices_: *Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_adaptive_max_pool2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -6321,7 +6557,7 @@ pub const Tensor = struct {
     }
 
     pub fn adaptiveMaxPool2dOut(
-        self: *const Tensor, out: *Tensor, indices_: *Tensor, output_size: []i64
+        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, output_size: []i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_adaptive_max_pool2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6343,7 +6579,7 @@ pub const Tensor = struct {
     }
 
     pub fn adaptiveMaxPool3dBackward(
-        self: *const Tensor, grad_output: *Tensor, indices_: *Tensor
+        self: *const Tensor, grad_output: *const Tensor, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_adaptive_max_pool3d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -6354,7 +6590,7 @@ pub const Tensor = struct {
     }
 
     pub fn adaptiveMaxPool3dBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, indices_: *Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_adaptive_max_pool3d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -6366,7 +6602,7 @@ pub const Tensor = struct {
     }
 
     pub fn adaptiveMaxPool3dOut(
-        self: *const Tensor, out: *Tensor, indices_: *Tensor, output_size: []i64
+        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, output_size: []i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_adaptive_max_pool3d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6378,7 +6614,7 @@ pub const Tensor = struct {
     }
 
     pub fn add(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_add(@ptrCast(&c_tensors), self.c_tensor,
@@ -6388,7 +6624,7 @@ pub const Tensor = struct {
     }
 
     pub fn add_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_add_(@ptrCast(&c_tensors), self.c_tensor,
@@ -6398,7 +6634,7 @@ pub const Tensor = struct {
     }
 
     pub fn addOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_add_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6429,7 +6665,7 @@ pub const Tensor = struct {
     }
 
     pub fn addScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_add_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6440,7 +6676,7 @@ pub const Tensor = struct {
     }
 
     pub fn addbmm(
-        self: *const Tensor, batch1: *Tensor, batch2: *Tensor
+        self: *const Tensor, batch1: *const Tensor, batch2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_addbmm(@ptrCast(&c_tensors), self.c_tensor,
@@ -6451,7 +6687,7 @@ pub const Tensor = struct {
     }
 
     pub fn addbmm_(
-        self: *Tensor, batch1: *Tensor, batch2: *Tensor
+        self: *Tensor, batch1: *const Tensor, batch2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_addbmm_(@ptrCast(&c_tensors), self.c_tensor,
@@ -6462,7 +6698,7 @@ pub const Tensor = struct {
     }
 
     pub fn addbmmOut(
-        self: *const Tensor, out: *Tensor, batch1: *Tensor, batch2: *Tensor
+        self: *const Tensor, out: *const Tensor, batch1: *const Tensor, batch2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_addbmm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6474,7 +6710,7 @@ pub const Tensor = struct {
     }
 
     pub fn addcdiv(
-        self: *const Tensor, tensor1: *Tensor, tensor2: *Tensor
+        self: *const Tensor, tensor1: *const Tensor, tensor2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_addcdiv(@ptrCast(&c_tensors), self.c_tensor,
@@ -6485,7 +6721,7 @@ pub const Tensor = struct {
     }
 
     pub fn addcdiv_(
-        self: *Tensor, tensor1: *Tensor, tensor2: *Tensor
+        self: *Tensor, tensor1: *const Tensor, tensor2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_addcdiv_(@ptrCast(&c_tensors), self.c_tensor,
@@ -6496,7 +6732,7 @@ pub const Tensor = struct {
     }
 
     pub fn addcdivOut(
-        self: *const Tensor, out: *Tensor, tensor1: *Tensor, tensor2: *Tensor
+        self: *const Tensor, out: *const Tensor, tensor1: *const Tensor, tensor2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_addcdiv_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6508,7 +6744,7 @@ pub const Tensor = struct {
     }
 
     pub fn addcmul(
-        self: *const Tensor, tensor1: *Tensor, tensor2: *Tensor
+        self: *const Tensor, tensor1: *const Tensor, tensor2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_addcmul(@ptrCast(&c_tensors), self.c_tensor,
@@ -6519,7 +6755,7 @@ pub const Tensor = struct {
     }
 
     pub fn addcmul_(
-        self: *Tensor, tensor1: *Tensor, tensor2: *Tensor
+        self: *Tensor, tensor1: *const Tensor, tensor2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_addcmul_(@ptrCast(&c_tensors), self.c_tensor,
@@ -6530,7 +6766,7 @@ pub const Tensor = struct {
     }
 
     pub fn addcmulOut(
-        self: *const Tensor, out: *Tensor, tensor1: *Tensor, tensor2: *Tensor
+        self: *const Tensor, out: *const Tensor, tensor1: *const Tensor, tensor2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_addcmul_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6542,7 +6778,7 @@ pub const Tensor = struct {
     }
 
     pub fn addmm(
-        self: *const Tensor, mat1: *Tensor, mat2: *Tensor
+        self: *const Tensor, mat1: *const Tensor, mat2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_addmm(@ptrCast(&c_tensors), self.c_tensor,
@@ -6553,7 +6789,7 @@ pub const Tensor = struct {
     }
 
     pub fn addmm_(
-        self: *Tensor, mat1: *Tensor, mat2: *Tensor
+        self: *Tensor, mat1: *const Tensor, mat2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_addmm_(@ptrCast(&c_tensors), self.c_tensor,
@@ -6564,7 +6800,7 @@ pub const Tensor = struct {
     }
 
     pub fn addmmOut(
-        self: *const Tensor, out: *Tensor, mat1: *Tensor, mat2: *Tensor
+        self: *const Tensor, out: *const Tensor, mat1: *const Tensor, mat2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_addmm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6576,7 +6812,7 @@ pub const Tensor = struct {
     }
 
     pub fn addmv(
-        self: *const Tensor, mat: *Tensor, vec: *Tensor
+        self: *const Tensor, mat: *const Tensor, vec: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_addmv(@ptrCast(&c_tensors), self.c_tensor,
@@ -6587,7 +6823,7 @@ pub const Tensor = struct {
     }
 
     pub fn addmv_(
-        self: *Tensor, mat: *Tensor, vec: *Tensor
+        self: *Tensor, mat: *const Tensor, vec: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_addmv_(@ptrCast(&c_tensors), self.c_tensor,
@@ -6598,7 +6834,7 @@ pub const Tensor = struct {
     }
 
     pub fn addmvOut(
-        self: *const Tensor, out: *Tensor, mat: *Tensor, vec: *Tensor
+        self: *const Tensor, out: *const Tensor, mat: *const Tensor, vec: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_addmv_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6610,7 +6846,7 @@ pub const Tensor = struct {
     }
 
     pub fn addr(
-        self: *const Tensor, vec1: *Tensor, vec2: *Tensor
+        self: *const Tensor, vec1: *const Tensor, vec2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_addr(@ptrCast(&c_tensors), self.c_tensor,
@@ -6621,7 +6857,7 @@ pub const Tensor = struct {
     }
 
     pub fn addr_(
-        self: *Tensor, vec1: *Tensor, vec2: *Tensor
+        self: *Tensor, vec1: *const Tensor, vec2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_addr_(@ptrCast(&c_tensors), self.c_tensor,
@@ -6632,7 +6868,7 @@ pub const Tensor = struct {
     }
 
     pub fn addrOut(
-        self: *const Tensor, out: *Tensor, vec1: *Tensor, vec2: *Tensor
+        self: *const Tensor, out: *const Tensor, vec1: *const Tensor, vec2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_addr_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6653,7 +6889,7 @@ pub const Tensor = struct {
     }
 
     pub fn affineGridGenerator(
-        theta: *Tensor, size_: []i64, align_corners: bool
+        theta: *const Tensor, size_: []i64, align_corners: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_affine_grid_generator(@ptrCast(&c_tensors), theta.c_tensor,
@@ -6664,7 +6900,7 @@ pub const Tensor = struct {
     }
 
     pub fn affineGridGeneratorBackward(
-        gradient: *Tensor, size_: []i64, align_corners: bool
+        gradient: *const Tensor, size_: []i64, align_corners: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_affine_grid_generator_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -6675,7 +6911,7 @@ pub const Tensor = struct {
     }
 
     pub fn affineGridGeneratorOut(
-        out: *Tensor, theta: *Tensor, size_: []i64, align_corners: bool
+        out: *const Tensor, theta: *const Tensor, size_: []i64, align_corners: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_affine_grid_generator_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6705,7 +6941,7 @@ pub const Tensor = struct {
     }
 
     pub fn aliasCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_alias_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6715,7 +6951,7 @@ pub const Tensor = struct {
     }
 
     pub fn alignAs(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_align_as(@ptrCast(&c_tensors), self.c_tensor,
@@ -6725,16 +6961,16 @@ pub const Tensor = struct {
     }
 
     pub fn alignTensors(
-        tensors: []*Tensor
+        tensors: []*const Tensor
     ) []Tensor {
         const c_tensors = __c.atg_align_tensors(ptrList(tensors).ptr, @intCast(tensors.len));
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
@@ -6749,7 +6985,7 @@ pub const Tensor = struct {
     }
 
     pub fn allAllOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_all_all_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6781,7 +7017,7 @@ pub const Tensor = struct {
     }
 
     pub fn allDimsOut(
-        self: *const Tensor, out: *Tensor, dim_: ?[]i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: ?[]i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_all_dims_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6793,7 +7029,7 @@ pub const Tensor = struct {
     }
 
     pub fn allOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_all_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6805,7 +7041,7 @@ pub const Tensor = struct {
     }
 
     pub fn allclose(
-        self: *const Tensor, other: *Tensor, rtol: f64, atol: f64, equal_nan: bool
+        self: *const Tensor, other: *const Tensor, rtol: f64, atol: f64, equal_nan: bool
     ) bool {
         const return_ = __c.atg_allclose(self.c_tensor,
                 other.c_tensor,
@@ -6850,7 +7086,7 @@ pub const Tensor = struct {
     }
 
     pub fn amaxOut(
-        self: *const Tensor, out: *Tensor, dim_: []i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: []i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_amax_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6873,7 +7109,7 @@ pub const Tensor = struct {
     }
 
     pub fn aminOut(
-        self: *const Tensor, out: *Tensor, dim_: []i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: []i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_amin_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6896,7 +7132,7 @@ pub const Tensor = struct {
     }
 
     pub fn aminmaxOut(
-        self: *const Tensor, min_: *Tensor, max_: *Tensor, dim_: ?i64, keepdim: bool
+        self: *const Tensor, min_: *const Tensor, max_: *const Tensor, dim_: ?i64, keepdim: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_aminmax_out(@ptrCast(&c_tensors), min_.c_tensor,
@@ -6918,7 +7154,7 @@ pub const Tensor = struct {
     }
 
     pub fn angleOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_angle_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6937,7 +7173,7 @@ pub const Tensor = struct {
     }
 
     pub fn anyAllOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_any_all_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6969,7 +7205,7 @@ pub const Tensor = struct {
     }
 
     pub fn anyDimsOut(
-        self: *const Tensor, out: *Tensor, dim_: ?[]i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: ?[]i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_any_dims_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6981,7 +7217,7 @@ pub const Tensor = struct {
     }
 
     pub fn anyOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_any_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -6993,34 +7229,34 @@ pub const Tensor = struct {
     }
 
     pub fn arange(
-        end: Scalar, options: TensorOptions
+        end: Scalar, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_arange(@ptrCast(&c_tensors), end.into().c_scalar,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn arangeStart(
-        start: Scalar, end: Scalar, options: TensorOptions
+        start: Scalar, end: Scalar, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_arange_start(@ptrCast(&c_tensors), start.into().c_scalar,
                 end.into().c_scalar,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn arangeStartStep(
-        start: Scalar, end: Scalar, step: Scalar, options: TensorOptions
+        start: Scalar, end: Scalar, step: Scalar, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_arange_start_step(@ptrCast(&c_tensors), start.into().c_scalar,
                 end.into().c_scalar,
                 step.into().c_scalar,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -7044,7 +7280,7 @@ pub const Tensor = struct {
     }
 
     pub fn arccosOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_arccos_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7072,7 +7308,7 @@ pub const Tensor = struct {
     }
 
     pub fn arccoshOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_arccosh_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7100,7 +7336,7 @@ pub const Tensor = struct {
     }
 
     pub fn arcsinOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_arcsin_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7128,7 +7364,7 @@ pub const Tensor = struct {
     }
 
     pub fn arcsinhOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_arcsinh_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7147,7 +7383,7 @@ pub const Tensor = struct {
     }
 
     pub fn arctan2(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_arctan2(@ptrCast(&c_tensors), self.c_tensor,
@@ -7157,7 +7393,7 @@ pub const Tensor = struct {
     }
 
     pub fn arctan2_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_arctan2_(@ptrCast(&c_tensors), self.c_tensor,
@@ -7167,7 +7403,7 @@ pub const Tensor = struct {
     }
 
     pub fn arctan2Out(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_arctan2_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7187,7 +7423,7 @@ pub const Tensor = struct {
     }
 
     pub fn arctanOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_arctan_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7215,7 +7451,7 @@ pub const Tensor = struct {
     }
 
     pub fn arctanhOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_arctanh_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7236,7 +7472,7 @@ pub const Tensor = struct {
     }
 
     pub fn argmaxOut(
-        self: *const Tensor, out: *Tensor, dim_: ?i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: ?i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_argmax_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7259,7 +7495,7 @@ pub const Tensor = struct {
     }
 
     pub fn argminOut(
-        self: *const Tensor, out: *Tensor, dim_: ?i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: ?i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_argmin_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7294,7 +7530,7 @@ pub const Tensor = struct {
     }
 
     pub fn argsortStableOut(
-        self: *const Tensor, out: *Tensor, stable: bool, dim_: i64, descending: bool
+        self: *const Tensor, out: *const Tensor, stable: bool, dim_: i64, descending: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_argsort_stable_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7352,7 +7588,7 @@ pub const Tensor = struct {
     }
 
     pub fn asStridedCopyOut(
-        self: *const Tensor, out: *Tensor, size_: []i64, stride_: []i64, storage_offset: ?i64
+        self: *const Tensor, out: *const Tensor, size_: []i64, stride_: []i64, storage_offset: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_as_strided_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7365,7 +7601,7 @@ pub const Tensor = struct {
     }
 
     pub fn asStridedScatter(
-        self: *const Tensor, src: *Tensor, size_: []i64, stride_: []i64, storage_offset: ?i64
+        self: *const Tensor, src: *const Tensor, size_: []i64, stride_: []i64, storage_offset: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_as_strided_scatter(@ptrCast(&c_tensors), self.c_tensor,
@@ -7378,7 +7614,7 @@ pub const Tensor = struct {
     }
 
     pub fn asStridedScatterOut(
-        self: *const Tensor, out: *Tensor, src: *Tensor, size_: []i64, stride_: []i64, storage_offset: ?i64
+        self: *const Tensor, out: *const Tensor, src: *const Tensor, size_: []i64, stride_: []i64, storage_offset: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_as_strided_scatter_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7410,7 +7646,7 @@ pub const Tensor = struct {
     }
 
     pub fn asinOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_asin_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7438,7 +7674,7 @@ pub const Tensor = struct {
     }
 
     pub fn asinhOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_asinh_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7457,7 +7693,7 @@ pub const Tensor = struct {
     }
 
     pub fn atan2(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_atan2(@ptrCast(&c_tensors), self.c_tensor,
@@ -7467,7 +7703,7 @@ pub const Tensor = struct {
     }
 
     pub fn atan2_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_atan2_(@ptrCast(&c_tensors), self.c_tensor,
@@ -7477,7 +7713,7 @@ pub const Tensor = struct {
     }
 
     pub fn atan2Out(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_atan2_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7497,7 +7733,7 @@ pub const Tensor = struct {
     }
 
     pub fn atanOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_atan_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7525,7 +7761,7 @@ pub const Tensor = struct {
     }
 
     pub fn atanhOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_atanh_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7544,16 +7780,16 @@ pub const Tensor = struct {
     }
 
     pub fn atleast1dSequence(
-        tensors: []*Tensor
+        tensors: []*const Tensor
     ) []Tensor {
         const c_tensors = __c.atg_atleast_1d_sequence(ptrList(tensors).ptr, @intCast(tensors.len));
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
@@ -7568,16 +7804,16 @@ pub const Tensor = struct {
     }
 
     pub fn atleast2dSequence(
-        tensors: []*Tensor
+        tensors: []*const Tensor
     ) []Tensor {
         const c_tensors = __c.atg_atleast_2d_sequence(ptrList(tensors).ptr, @intCast(tensors.len));
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
@@ -7592,16 +7828,16 @@ pub const Tensor = struct {
     }
 
     pub fn atleast3dSequence(
-        tensors: []*Tensor
+        tensors: []*const Tensor
     ) []Tensor {
         const c_tensors = __c.atg_atleast_3d_sequence(ptrList(tensors).ptr, @intCast(tensors.len));
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
@@ -7636,7 +7872,7 @@ pub const Tensor = struct {
     }
 
     pub fn avgPool2dBackward(
-        self: *const Tensor, grad_output: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
+        self: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_avg_pool2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -7652,7 +7888,7 @@ pub const Tensor = struct {
     }
 
     pub fn avgPool2dBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_avg_pool2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -7669,7 +7905,7 @@ pub const Tensor = struct {
     }
 
     pub fn avgPool2dOut(
-        self: *const Tensor, out: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
+        self: *const Tensor, out: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_avg_pool2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7700,7 +7936,7 @@ pub const Tensor = struct {
     }
 
     pub fn avgPool3dBackward(
-        self: *const Tensor, grad_output: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
+        self: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_avg_pool3d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -7716,7 +7952,7 @@ pub const Tensor = struct {
     }
 
     pub fn avgPool3dBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_avg_pool3d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -7733,7 +7969,7 @@ pub const Tensor = struct {
     }
 
     pub fn avgPool3dOut(
-        self: *const Tensor, out: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
+        self: *const Tensor, out: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_avg_pool3d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7749,7 +7985,7 @@ pub const Tensor = struct {
     }
 
     pub fn baddbmm(
-        self: *const Tensor, batch1: *Tensor, batch2: *Tensor, beta: Scalar, alpha: Scalar
+        self: *const Tensor, batch1: *const Tensor, batch2: *const Tensor, beta: Scalar, alpha: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_baddbmm(@ptrCast(&c_tensors), self.c_tensor,
@@ -7762,7 +7998,7 @@ pub const Tensor = struct {
     }
 
     pub fn baddbmm_(
-        self: *Tensor, batch1: *Tensor, batch2: *Tensor
+        self: *Tensor, batch1: *const Tensor, batch2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_baddbmm_(@ptrCast(&c_tensors), self.c_tensor,
@@ -7773,7 +8009,7 @@ pub const Tensor = struct {
     }
 
     pub fn baddbmmOut(
-        self: *const Tensor, out: *Tensor, batch1: *Tensor, batch2: *Tensor
+        self: *const Tensor, out: *const Tensor, batch1: *const Tensor, batch2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_baddbmm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7785,17 +8021,17 @@ pub const Tensor = struct {
     }
 
     pub fn bartlettWindow(
-        window_length: i64, options: TensorOptions
+        window_length: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bartlett_window(@ptrCast(&c_tensors), window_length,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn bartlettWindowOut(
-        out: *Tensor, window_length: i64
+        out: *const Tensor, window_length: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bartlett_window_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7805,18 +8041,18 @@ pub const Tensor = struct {
     }
 
     pub fn bartlettWindowPeriodic(
-        window_length: i64, periodic: bool, options: TensorOptions
+        window_length: i64, periodic: bool, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bartlett_window_periodic(@ptrCast(&c_tensors), window_length,
                 if (periodic)  1  else  0,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn bartlettWindowPeriodicOut(
-        out: *Tensor, window_length: i64, periodic: bool
+        out: *const Tensor, window_length: i64, periodic: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bartlett_window_periodic_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7827,7 +8063,7 @@ pub const Tensor = struct {
     }
 
     pub fn batchNorm(
-        self: *const Tensor, weight: ?*Tensor, bias: ?*Tensor, running_mean: ?*Tensor, running_var: ?*Tensor, training: bool, momentum: f64, eps: f64, cudnn_enabled: bool
+        self: *const Tensor, weight: ?*const Tensor, bias: ?*const Tensor, running_mean: ?*const Tensor, running_var: ?*const Tensor, training: bool, momentum: f64, eps: f64, cudnn_enabled: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_batch_norm(@ptrCast(&c_tensors), self.c_tensor,
@@ -7844,7 +8080,7 @@ pub const Tensor = struct {
     }
 
     pub fn batchNormBackwardElemt(
-        self: *const Tensor, grad_out: *Tensor, mean_: *Tensor, invstd: *Tensor, weight: ?*Tensor, sum_dy: *Tensor, sum_dy_xmu: *Tensor, count: *Tensor
+        self: *const Tensor, grad_out: *const Tensor, mean_: *const Tensor, invstd: *const Tensor, weight: ?*const Tensor, sum_dy: *const Tensor, sum_dy_xmu: *const Tensor, count: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_batch_norm_backward_elemt(@ptrCast(&c_tensors), grad_out.c_tensor,
@@ -7860,7 +8096,7 @@ pub const Tensor = struct {
     }
 
     pub fn batchNormBackwardElemtOut(
-        self: *const Tensor, out: *Tensor, grad_out: *Tensor, mean_: *Tensor, invstd: *Tensor, weight: ?*Tensor, sum_dy: *Tensor, sum_dy_xmu: *Tensor, count: *Tensor
+        self: *const Tensor, out: *const Tensor, grad_out: *const Tensor, mean_: *const Tensor, invstd: *const Tensor, weight: ?*const Tensor, sum_dy: *const Tensor, sum_dy_xmu: *const Tensor, count: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_batch_norm_backward_elemt_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7877,7 +8113,7 @@ pub const Tensor = struct {
     }
 
     pub fn batchNormBackwardReduce(
-        self: *const Tensor, grad_out: *Tensor, mean_: *Tensor, invstd: *Tensor, weight: ?*Tensor, input_g: bool, weight_g: bool, bias_g: bool
+        self: *const Tensor, grad_out: *const Tensor, mean_: *const Tensor, invstd: *const Tensor, weight: ?*const Tensor, input_g: bool, weight_g: bool, bias_g: bool
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg_batch_norm_backward_reduce(@ptrCast(&c_tensors), grad_out.c_tensor,
@@ -7893,7 +8129,7 @@ pub const Tensor = struct {
     }
 
     pub fn batchNormBackwardReduceOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, out2: *Tensor, out3: *Tensor, grad_out: *Tensor, mean_: *Tensor, invstd: *Tensor, weight: ?*Tensor, input_g: bool, weight_g: bool, bias_g: bool
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, out3: *const Tensor, grad_out: *const Tensor, mean_: *const Tensor, invstd: *const Tensor, weight: ?*const Tensor, input_g: bool, weight_g: bool, bias_g: bool
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg_batch_norm_backward_reduce_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -7913,7 +8149,7 @@ pub const Tensor = struct {
     }
 
     pub fn batchNormElemt(
-        self: *const Tensor, weight: ?*Tensor, bias: ?*Tensor, mean_: *Tensor, invstd: *Tensor, eps: f64
+        self: *const Tensor, weight: ?*const Tensor, bias: ?*const Tensor, mean_: *const Tensor, invstd: *const Tensor, eps: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_batch_norm_elemt(@ptrCast(&c_tensors), self.c_tensor,
@@ -7927,7 +8163,7 @@ pub const Tensor = struct {
     }
 
     pub fn batchNormElemtOut(
-        self: *const Tensor, out: *Tensor, weight: ?*Tensor, bias: ?*Tensor, mean_: *Tensor, invstd: *Tensor, eps: f64
+        self: *const Tensor, out: *const Tensor, weight: ?*const Tensor, bias: ?*const Tensor, mean_: *const Tensor, invstd: *const Tensor, eps: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_batch_norm_elemt_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -7942,7 +8178,7 @@ pub const Tensor = struct {
     }
 
     pub fn batchNormGatherStats(
-        self: *const Tensor, mean_: *Tensor, invstd: *Tensor, running_mean: ?*Tensor, running_var: ?*Tensor, momentum: f64, eps: f64, count: i64
+        self: *const Tensor, mean_: *const Tensor, invstd: *const Tensor, running_mean: ?*const Tensor, running_var: ?*const Tensor, momentum: f64, eps: f64, count: i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_batch_norm_gather_stats(@ptrCast(&c_tensors), self.c_tensor,
@@ -7958,7 +8194,7 @@ pub const Tensor = struct {
     }
 
     pub fn batchNormGatherStatsOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, mean_: *Tensor, invstd: *Tensor, running_mean: ?*Tensor, running_var: ?*Tensor, momentum: f64, eps: f64, count: i64
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, mean_: *const Tensor, invstd: *const Tensor, running_mean: ?*const Tensor, running_var: ?*const Tensor, momentum: f64, eps: f64, count: i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_batch_norm_gather_stats_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -7976,7 +8212,7 @@ pub const Tensor = struct {
     }
 
     pub fn batchNormGatherStatsWithCounts(
-        self: *const Tensor, mean_: *Tensor, invstd: *Tensor, running_mean: ?*Tensor, running_var: ?*Tensor, momentum: f64, eps: f64, counts: *Tensor
+        self: *const Tensor, mean_: *const Tensor, invstd: *const Tensor, running_mean: ?*const Tensor, running_var: ?*const Tensor, momentum: f64, eps: f64, counts: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_batch_norm_gather_stats_with_counts(@ptrCast(&c_tensors), self.c_tensor,
@@ -7992,7 +8228,7 @@ pub const Tensor = struct {
     }
 
     pub fn batchNormGatherStatsWithCountsOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, mean_: *Tensor, invstd: *Tensor, running_mean: ?*Tensor, running_var: ?*Tensor, momentum: f64, eps: f64, counts: *Tensor
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, mean_: *const Tensor, invstd: *const Tensor, running_mean: ?*const Tensor, running_var: ?*const Tensor, momentum: f64, eps: f64, counts: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_batch_norm_gather_stats_with_counts_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -8020,7 +8256,7 @@ pub const Tensor = struct {
     }
 
     pub fn batchNormStatsOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, eps: f64
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, eps: f64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_batch_norm_stats_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -8032,7 +8268,7 @@ pub const Tensor = struct {
     }
 
     pub fn batchNormUpdateStats(
-        self: *const Tensor, running_mean: ?*Tensor, running_var: ?*Tensor, momentum: f64
+        self: *const Tensor, running_mean: ?*const Tensor, running_var: ?*const Tensor, momentum: f64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_batch_norm_update_stats(@ptrCast(&c_tensors), self.c_tensor,
@@ -8044,7 +8280,7 @@ pub const Tensor = struct {
     }
 
     pub fn batchNormUpdateStatsOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, running_mean: ?*Tensor, running_var: ?*Tensor, momentum: f64
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, running_mean: ?*const Tensor, running_var: ?*const Tensor, momentum: f64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_batch_norm_update_stats_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -8067,7 +8303,7 @@ pub const Tensor = struct {
     }
 
     pub fn bernoulli_(
-        self: *Tensor, p: *Tensor
+        self: *Tensor, p: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bernoulli_(@ptrCast(&c_tensors), self.c_tensor,
@@ -8097,7 +8333,7 @@ pub const Tensor = struct {
     }
 
     pub fn bernoulliTensor(
-        self: *const Tensor, p: *Tensor
+        self: *const Tensor, p: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bernoulli_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -8107,7 +8343,7 @@ pub const Tensor = struct {
     }
 
     pub fn bilinear(
-        input1: *Tensor, input2: *Tensor, weight: *Tensor, bias: ?*Tensor
+        input1: *const Tensor, input2: *const Tensor, weight: *const Tensor, bias: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bilinear(@ptrCast(&c_tensors), input1.c_tensor,
@@ -8119,7 +8355,7 @@ pub const Tensor = struct {
     }
 
     pub fn binaryCrossEntropy(
-        self: *const Tensor, target: *Tensor, weight: ?*Tensor, reduction: i64
+        self: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_binary_cross_entropy(@ptrCast(&c_tensors), self.c_tensor,
@@ -8131,7 +8367,7 @@ pub const Tensor = struct {
     }
 
     pub fn binaryCrossEntropyBackward(
-        self: *const Tensor, grad_output: *Tensor, target: *Tensor, weight: ?*Tensor, reduction: i64
+        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_binary_cross_entropy_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -8144,7 +8380,7 @@ pub const Tensor = struct {
     }
 
     pub fn binaryCrossEntropyBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, target: *Tensor, weight: ?*Tensor, reduction: i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_binary_cross_entropy_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -8158,7 +8394,7 @@ pub const Tensor = struct {
     }
 
     pub fn binaryCrossEntropyOut(
-        self: *const Tensor, out: *Tensor, target: *Tensor, weight: ?*Tensor, reduction: i64
+        self: *const Tensor, out: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_binary_cross_entropy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8171,7 +8407,7 @@ pub const Tensor = struct {
     }
 
     pub fn binaryCrossEntropyWithLogits(
-        self: *const Tensor, target: *Tensor, weight: ?*Tensor, pos_weight: ?*Tensor, reduction: i64
+        self: *const Tensor, target: *const Tensor, weight: ?*const Tensor, pos_weight: ?*const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_binary_cross_entropy_with_logits(@ptrCast(&c_tensors), self.c_tensor,
@@ -8184,7 +8420,7 @@ pub const Tensor = struct {
     }
 
     pub fn binaryCrossEntropyWithLogitsOut(
-        self: *const Tensor, out: *Tensor, target: *Tensor, weight: ?*Tensor, pos_weight: ?*Tensor, reduction: i64
+        self: *const Tensor, out: *const Tensor, target: *const Tensor, weight: ?*const Tensor, pos_weight: ?*const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_binary_cross_entropy_with_logits_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8198,7 +8434,7 @@ pub const Tensor = struct {
     }
 
     pub fn bincount(
-        self: *const Tensor, weights: ?*Tensor, minlength: i64
+        self: *const Tensor, weights: ?*const Tensor, minlength: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bincount(@ptrCast(&c_tensors), self.c_tensor,
@@ -8209,7 +8445,7 @@ pub const Tensor = struct {
     }
 
     pub fn bincountOut(
-        self: *const Tensor, out: *Tensor, weights: ?*Tensor, minlength: i64
+        self: *const Tensor, out: *const Tensor, weights: ?*const Tensor, minlength: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bincount_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8221,7 +8457,7 @@ pub const Tensor = struct {
     }
 
     pub fn binomial(
-        count: *Tensor, prob: *Tensor
+        count: *const Tensor, prob: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_binomial(@ptrCast(&c_tensors), count.c_tensor,
@@ -8231,7 +8467,7 @@ pub const Tensor = struct {
     }
 
     pub fn binomialOut(
-        out: *Tensor, count: *Tensor, prob: *Tensor
+        out: *const Tensor, count: *const Tensor, prob: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_binomial_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8262,7 +8498,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseAndScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_and_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8273,7 +8509,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseAndScalarTensor(
-        self_scalar: Scalar, other: *Tensor
+        self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_and_scalar_tensor(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
@@ -8283,7 +8519,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseAndScalarTensorOut(
-        out: *Tensor, self_scalar: Scalar, other: *Tensor
+        out: *const Tensor, self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_and_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8294,7 +8530,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseAndTensor(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_and_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -8304,7 +8540,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseAndTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_and_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -8314,7 +8550,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseAndTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_and_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8325,7 +8561,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseLeftShift(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_left_shift(@ptrCast(&c_tensors), self.c_tensor,
@@ -8335,7 +8571,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseLeftShift_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_left_shift_(@ptrCast(&c_tensors), self.c_tensor,
@@ -8345,7 +8581,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseLeftShiftScalarTensor(
-        self_scalar: Scalar, other: *Tensor
+        self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_left_shift_scalar_tensor(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
@@ -8355,7 +8591,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseLeftShiftScalarTensorOut(
-        out: *Tensor, self_scalar: Scalar, other: *Tensor
+        out: *const Tensor, self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_left_shift_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8366,7 +8602,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseLeftShiftTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_left_shift_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8397,7 +8633,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseLeftShiftTensorScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_left_shift_tensor_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8426,7 +8662,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseNotOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_not_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8456,7 +8692,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseOrScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_or_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8467,7 +8703,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseOrScalarTensor(
-        self_scalar: Scalar, other: *Tensor
+        self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_or_scalar_tensor(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
@@ -8477,7 +8713,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseOrScalarTensorOut(
-        out: *Tensor, self_scalar: Scalar, other: *Tensor
+        out: *const Tensor, self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_or_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8488,7 +8724,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseOrTensor(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_or_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -8498,7 +8734,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseOrTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_or_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -8508,7 +8744,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseOrTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_or_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8519,7 +8755,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseRightShift(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_right_shift(@ptrCast(&c_tensors), self.c_tensor,
@@ -8529,7 +8765,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseRightShift_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_right_shift_(@ptrCast(&c_tensors), self.c_tensor,
@@ -8539,7 +8775,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseRightShiftScalarTensor(
-        self_scalar: Scalar, other: *Tensor
+        self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_right_shift_scalar_tensor(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
@@ -8549,7 +8785,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseRightShiftScalarTensorOut(
-        out: *Tensor, self_scalar: Scalar, other: *Tensor
+        out: *const Tensor, self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_right_shift_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8560,7 +8796,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseRightShiftTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_right_shift_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8591,7 +8827,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseRightShiftTensorScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_right_shift_tensor_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8622,7 +8858,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseXorScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_xor_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8633,7 +8869,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseXorScalarTensor(
-        self_scalar: Scalar, other: *Tensor
+        self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_xor_scalar_tensor(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
@@ -8643,7 +8879,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseXorScalarTensorOut(
-        out: *Tensor, self_scalar: Scalar, other: *Tensor
+        out: *const Tensor, self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_xor_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8654,7 +8890,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseXorTensor(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_xor_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -8664,7 +8900,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseXorTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_xor_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -8674,7 +8910,7 @@ pub const Tensor = struct {
     }
 
     pub fn bitwiseXorTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_xor_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8685,17 +8921,17 @@ pub const Tensor = struct {
     }
 
     pub fn blackmanWindow(
-        window_length: i64, options: TensorOptions
+        window_length: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_blackman_window(@ptrCast(&c_tensors), window_length,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn blackmanWindowOut(
-        out: *Tensor, window_length: i64
+        out: *const Tensor, window_length: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_blackman_window_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8705,18 +8941,18 @@ pub const Tensor = struct {
     }
 
     pub fn blackmanWindowPeriodic(
-        window_length: i64, periodic: bool, options: TensorOptions
+        window_length: i64, periodic: bool, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_blackman_window_periodic(@ptrCast(&c_tensors), window_length,
                 if (periodic)  1  else  0,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn blackmanWindowPeriodicOut(
-        out: *Tensor, window_length: i64, periodic: bool
+        out: *const Tensor, window_length: i64, periodic: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_blackman_window_periodic_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8727,7 +8963,7 @@ pub const Tensor = struct {
     }
 
     pub fn blockDiag(
-        tensors: []*Tensor
+        tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_block_diag(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len));
@@ -8736,7 +8972,7 @@ pub const Tensor = struct {
     }
 
     pub fn blockDiagOut(
-        out: *Tensor, tensors: []*Tensor
+        out: *const Tensor, tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_block_diag_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8746,7 +8982,7 @@ pub const Tensor = struct {
     }
 
     pub fn bmm(
-        self: *const Tensor, mat2: *Tensor
+        self: *const Tensor, mat2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bmm(@ptrCast(&c_tensors), self.c_tensor,
@@ -8756,7 +8992,7 @@ pub const Tensor = struct {
     }
 
     pub fn bmmOut(
-        self: *const Tensor, out: *Tensor, mat2: *Tensor
+        self: *const Tensor, out: *const Tensor, mat2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bmm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8767,16 +9003,16 @@ pub const Tensor = struct {
     }
 
     pub fn broadcastTensors(
-        tensors: []*Tensor
+        tensors: []*const Tensor
     ) []Tensor {
         const c_tensors = __c.atg_broadcast_tensors(ptrList(tensors).ptr, @intCast(tensors.len));
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
@@ -8792,7 +9028,7 @@ pub const Tensor = struct {
     }
 
     pub fn bucketize(
-        self: *const Tensor, boundaries: *Tensor, out_int32: bool, right: bool
+        self: *const Tensor, boundaries: *const Tensor, out_int32: bool, right: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bucketize(@ptrCast(&c_tensors), self.c_tensor,
@@ -8804,7 +9040,7 @@ pub const Tensor = struct {
     }
 
     pub fn bucketizeScalar(
-        self_scalar: Scalar, boundaries: *Tensor, out_int32: bool, right: bool
+        self_scalar: Scalar, boundaries: *const Tensor, out_int32: bool, right: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bucketize_scalar(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
@@ -8816,7 +9052,7 @@ pub const Tensor = struct {
     }
 
     pub fn bucketizeScalarOut(
-        out: *Tensor, self_scalar: Scalar, boundaries: *Tensor, out_int32: bool, right: bool
+        out: *const Tensor, self_scalar: Scalar, boundaries: *const Tensor, out_int32: bool, right: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bucketize_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8829,7 +9065,7 @@ pub const Tensor = struct {
     }
 
     pub fn bucketizeTensorOut(
-        self: *const Tensor, out: *Tensor, boundaries: *Tensor, out_int32: bool, right: bool
+        self: *const Tensor, out: *const Tensor, boundaries: *const Tensor, out_int32: bool, right: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bucketize_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8851,7 +9087,7 @@ pub const Tensor = struct {
     }
 
     pub fn cartesianProd(
-        tensors: []*Tensor
+        tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cartesian_prod(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len));
@@ -8860,7 +9096,7 @@ pub const Tensor = struct {
     }
 
     pub fn cat(
-        tensors: []*Tensor, dim_: i64
+        tensors: []*const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cat(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len),
@@ -8870,7 +9106,7 @@ pub const Tensor = struct {
     }
 
     pub fn catOut(
-        out: *Tensor, tensors: []*Tensor, dim_: i64
+        out: *const Tensor, tensors: []*const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cat_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8903,7 +9139,7 @@ pub const Tensor = struct {
     }
 
     pub fn cauchyOut(
-        self: *const Tensor, out: *Tensor, median_: f64, sigma: f64
+        self: *const Tensor, out: *const Tensor, median_: f64, sigma: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cauchy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8933,7 +9169,7 @@ pub const Tensor = struct {
     }
 
     pub fn ccolIndicesCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ccol_indices_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -8943,7 +9179,7 @@ pub const Tensor = struct {
     }
 
     pub fn cdist(
-        x1: *Tensor, x2: *Tensor, p: f64, compute_mode: ?i64
+        x1: *const Tensor, x2: *const Tensor, p: f64, compute_mode: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cdist(@ptrCast(&c_tensors), x1.c_tensor,
@@ -8973,7 +9209,7 @@ pub const Tensor = struct {
     }
 
     pub fn ceilOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ceil_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9001,7 +9237,7 @@ pub const Tensor = struct {
     }
 
     pub fn celuOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_celu_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9011,7 +9247,7 @@ pub const Tensor = struct {
     }
 
     pub fn chainMatmul(
-        matrices: []*Tensor
+        matrices: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_chain_matmul(@ptrCast(&c_tensors), ptrList(matrices).ptr, @intCast(matrices.len));
@@ -9020,7 +9256,7 @@ pub const Tensor = struct {
     }
 
     pub fn chainMatmulOut(
-        out: *Tensor, matrices: []*Tensor
+        out: *const Tensor, matrices: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_chain_matmul_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9049,7 +9285,7 @@ pub const Tensor = struct {
     }
 
     pub fn channelShuffleOut(
-        self: *const Tensor, out: *Tensor, groups: i64
+        self: *const Tensor, out: *const Tensor, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_channel_shuffle_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9080,7 +9316,7 @@ pub const Tensor = struct {
     }
 
     pub fn choleskyInverseOut(
-        self: *const Tensor, out: *Tensor, upper: bool
+        self: *const Tensor, out: *const Tensor, upper: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cholesky_inverse_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9091,7 +9327,7 @@ pub const Tensor = struct {
     }
 
     pub fn choleskyOut(
-        self: *const Tensor, out: *Tensor, upper: bool
+        self: *const Tensor, out: *const Tensor, upper: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cholesky_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9102,7 +9338,7 @@ pub const Tensor = struct {
     }
 
     pub fn choleskySolve(
-        self: *const Tensor, input2: *Tensor, upper: bool
+        self: *const Tensor, input2: *const Tensor, upper: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cholesky_solve(@ptrCast(&c_tensors), self.c_tensor,
@@ -9113,7 +9349,7 @@ pub const Tensor = struct {
     }
 
     pub fn choleskySolveOut(
-        self: *const Tensor, out: *Tensor, input2: *Tensor, upper: bool
+        self: *const Tensor, out: *const Tensor, input2: *const Tensor, upper: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cholesky_solve_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9125,11 +9361,11 @@ pub const Tensor = struct {
     }
 
     pub fn chooseQparamsOptimized(
-        self: *const Tensor, numel: i64, n_bins: i64, ratio: f64, bit_width: i64
+        self: *const Tensor, numel_: i64, n_bins: i64, ratio: f64, bit_width: i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_choose_qparams_optimized(@ptrCast(&c_tensors), self.c_tensor,
-                numel,
+                numel_,
                 n_bins,
                 ratio,
                 bit_width);
@@ -9143,13 +9379,13 @@ pub const Tensor = struct {
         const c_tensors = __c.atg_chunk(self.c_tensor,
                 chunks,
                 dim_);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
@@ -9197,7 +9433,7 @@ pub const Tensor = struct {
     }
 
     pub fn clampMaxOut(
-        self: *const Tensor, out: *Tensor, max_: Scalar
+        self: *const Tensor, out: *const Tensor, max_: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_max_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9208,7 +9444,7 @@ pub const Tensor = struct {
     }
 
     pub fn clampMaxTensor(
-        self: *const Tensor, max_: *Tensor
+        self: *const Tensor, max_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_max_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -9218,7 +9454,7 @@ pub const Tensor = struct {
     }
 
     pub fn clampMaxTensor_(
-        self: *Tensor, max_: *Tensor
+        self: *Tensor, max_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_max_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -9228,7 +9464,7 @@ pub const Tensor = struct {
     }
 
     pub fn clampMaxTensorOut(
-        self: *const Tensor, out: *Tensor, max_: *Tensor
+        self: *const Tensor, out: *const Tensor, max_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_max_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9259,7 +9495,7 @@ pub const Tensor = struct {
     }
 
     pub fn clampMinOut(
-        self: *const Tensor, out: *Tensor, min_: Scalar
+        self: *const Tensor, out: *const Tensor, min_: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_min_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9270,7 +9506,7 @@ pub const Tensor = struct {
     }
 
     pub fn clampMinTensor(
-        self: *const Tensor, min_: *Tensor
+        self: *const Tensor, min_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_min_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -9280,7 +9516,7 @@ pub const Tensor = struct {
     }
 
     pub fn clampMinTensor_(
-        self: *Tensor, min_: *Tensor
+        self: *Tensor, min_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_min_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -9290,7 +9526,7 @@ pub const Tensor = struct {
     }
 
     pub fn clampMinTensorOut(
-        self: *const Tensor, out: *Tensor, min_: *Tensor
+        self: *const Tensor, out: *const Tensor, min_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_min_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9301,7 +9537,7 @@ pub const Tensor = struct {
     }
 
     pub fn clampOut(
-        self: *const Tensor, out: *Tensor, min_: Scalar, max_: Scalar
+        self: *const Tensor, out: *const Tensor, min_: Scalar, max_: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9313,7 +9549,7 @@ pub const Tensor = struct {
     }
 
     pub fn clampTensor(
-        self: *const Tensor, min_: ?*Tensor, max_: ?*Tensor
+        self: *const Tensor, min_: ?*const Tensor, max_: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -9324,7 +9560,7 @@ pub const Tensor = struct {
     }
 
     pub fn clampTensor_(
-        self: *Tensor, min_: ?*Tensor, max_: ?*Tensor
+        self: *Tensor, min_: ?*const Tensor, max_: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -9335,7 +9571,7 @@ pub const Tensor = struct {
     }
 
     pub fn clampTensorOut(
-        self: *const Tensor, out: *Tensor, min_: ?*Tensor, max_: ?*Tensor
+        self: *const Tensor, out: *const Tensor, min_: ?*const Tensor, max_: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9369,7 +9605,7 @@ pub const Tensor = struct {
     }
 
     pub fn clipOut(
-        self: *const Tensor, out: *Tensor, min_: Scalar, max_: Scalar
+        self: *const Tensor, out: *const Tensor, min_: Scalar, max_: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clip_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9381,7 +9617,7 @@ pub const Tensor = struct {
     }
 
     pub fn clipTensor(
-        self: *const Tensor, min_: ?*Tensor, max_: ?*Tensor
+        self: *const Tensor, min_: ?*const Tensor, max_: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clip_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -9392,7 +9628,7 @@ pub const Tensor = struct {
     }
 
     pub fn clipTensor_(
-        self: *Tensor, min_: ?*Tensor, max_: ?*Tensor
+        self: *Tensor, min_: ?*const Tensor, max_: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clip_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -9403,7 +9639,7 @@ pub const Tensor = struct {
     }
 
     pub fn clipTensorOut(
-        self: *const Tensor, out: *Tensor, min_: ?*Tensor, max_: ?*Tensor
+        self: *const Tensor, out: *const Tensor, min_: ?*const Tensor, max_: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clip_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9415,7 +9651,7 @@ pub const Tensor = struct {
     }
 
     pub fn clone(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clone(@ptrCast(&c_tensors), out.c_tensor,
@@ -9448,7 +9684,7 @@ pub const Tensor = struct {
     }
 
     pub fn col2imOut(
-        self: *const Tensor, out: *Tensor, output_size: []i64, kernel_size: []i64, dilation: []i64, padding: []i64, stride_: []i64
+        self: *const Tensor, out: *const Tensor, output_size: []i64, kernel_size: []i64, dilation: []i64, padding: []i64, stride_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_col2im_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9481,7 +9717,7 @@ pub const Tensor = struct {
     }
 
     pub fn colIndicesCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_col_indices_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9491,7 +9727,7 @@ pub const Tensor = struct {
     }
 
     pub fn columnStack(
-        tensors: []*Tensor
+        tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_column_stack(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len));
@@ -9500,7 +9736,7 @@ pub const Tensor = struct {
     }
 
     pub fn columnStackOut(
-        out: *Tensor, tensors: []*Tensor
+        out: *const Tensor, tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_column_stack_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9521,7 +9757,7 @@ pub const Tensor = struct {
     }
 
     pub fn complex(
-        real_: *Tensor, imag_: *Tensor
+        real_: *const Tensor, imag_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_complex(@ptrCast(&c_tensors), real_.c_tensor,
@@ -9531,7 +9767,7 @@ pub const Tensor = struct {
     }
 
     pub fn complexOut(
-        out: *Tensor, real_: *Tensor, imag_: *Tensor
+        out: *const Tensor, real_: *const Tensor, imag_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_complex_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9542,7 +9778,7 @@ pub const Tensor = struct {
     }
 
     pub fn concat(
-        tensors: []*Tensor, dim_: i64
+        tensors: []*const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_concat(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len),
@@ -9552,7 +9788,7 @@ pub const Tensor = struct {
     }
 
     pub fn concatOut(
-        out: *Tensor, tensors: []*Tensor, dim_: i64
+        out: *const Tensor, tensors: []*const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_concat_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9563,7 +9799,7 @@ pub const Tensor = struct {
     }
 
     pub fn concatenate(
-        tensors: []*Tensor, dim_: i64
+        tensors: []*const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_concatenate(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len),
@@ -9573,7 +9809,7 @@ pub const Tensor = struct {
     }
 
     pub fn concatenateOut(
-        out: *Tensor, tensors: []*Tensor, dim_: i64
+        out: *const Tensor, tensors: []*const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_concatenate_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9611,7 +9847,7 @@ pub const Tensor = struct {
     }
 
     pub fn conjPhysicalOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conj_physical_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9631,7 +9867,7 @@ pub const Tensor = struct {
     }
 
     pub fn constantPadNdOut(
-        self: *const Tensor, out: *Tensor, padding: []i64
+        self: *const Tensor, out: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_constant_pad_nd_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9651,7 +9887,7 @@ pub const Tensor = struct {
     }
 
     pub fn conv1d(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv1d(@ptrCast(&c_tensors), self.c_tensor,
@@ -9666,7 +9902,7 @@ pub const Tensor = struct {
     }
 
     pub fn conv1dPadding(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []u8, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []const u8, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv1d_padding(@ptrCast(&c_tensors), self.c_tensor,
@@ -9681,7 +9917,7 @@ pub const Tensor = struct {
     }
 
     pub fn conv2d(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv2d(@ptrCast(&c_tensors), self.c_tensor,
@@ -9696,7 +9932,7 @@ pub const Tensor = struct {
     }
 
     pub fn conv2dPadding(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []u8, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []const u8, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv2d_padding(@ptrCast(&c_tensors), self.c_tensor,
@@ -9711,7 +9947,7 @@ pub const Tensor = struct {
     }
 
     pub fn conv3d(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv3d(@ptrCast(&c_tensors), self.c_tensor,
@@ -9726,7 +9962,7 @@ pub const Tensor = struct {
     }
 
     pub fn conv3dPadding(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []u8, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []const u8, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv3d_padding(@ptrCast(&c_tensors), self.c_tensor,
@@ -9741,7 +9977,7 @@ pub const Tensor = struct {
     }
 
     pub fn convDepthwise3d(
-        self: *const Tensor, weight: *Tensor, kernel_size: []i64, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64
+        self: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv_depthwise3d(@ptrCast(&c_tensors), self.c_tensor,
@@ -9756,7 +9992,7 @@ pub const Tensor = struct {
     }
 
     pub fn convDepthwise3dOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, kernel_size: []i64, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv_depthwise3d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9772,7 +10008,7 @@ pub const Tensor = struct {
     }
 
     pub fn convTbc(
-        self: *const Tensor, weight: *Tensor, bias: *Tensor, padding: i64
+        self: *const Tensor, weight: *const Tensor, bias: *const Tensor, padding: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv_tbc(@ptrCast(&c_tensors), self.c_tensor,
@@ -9784,7 +10020,7 @@ pub const Tensor = struct {
     }
 
     pub fn convTbcBackward(
-        self: *const Tensor, input: *Tensor, weight: *Tensor, bias: *Tensor, padding: i64
+        self: *const Tensor, input: *const Tensor, weight: *const Tensor, bias: *const Tensor, padding: i64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_conv_tbc_backward(@ptrCast(&c_tensors), self.c_tensor,
@@ -9797,7 +10033,7 @@ pub const Tensor = struct {
     }
 
     pub fn convTbcOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, bias: *Tensor, padding: i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: *const Tensor, padding: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv_tbc_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9810,7 +10046,7 @@ pub const Tensor = struct {
     }
 
     pub fn convTranspose1d(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []i64, output_padding: []i64, groups: i64, dilation: []i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, output_padding: []i64, groups: i64, dilation: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv_transpose1d(@ptrCast(&c_tensors), self.c_tensor,
@@ -9826,7 +10062,7 @@ pub const Tensor = struct {
     }
 
     pub fn convTranspose2d(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []i64, output_padding: []i64, groups: i64, dilation: []i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, output_padding: []i64, groups: i64, dilation: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv_transpose2d(@ptrCast(&c_tensors), self.c_tensor,
@@ -9842,7 +10078,7 @@ pub const Tensor = struct {
     }
 
     pub fn convTranspose3d(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []i64, output_padding: []i64, groups: i64, dilation: []i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, output_padding: []i64, groups: i64, dilation: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv_transpose3d(@ptrCast(&c_tensors), self.c_tensor,
@@ -9858,7 +10094,7 @@ pub const Tensor = struct {
     }
 
     pub fn convolution(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_convolution(@ptrCast(&c_tensors), self.c_tensor,
@@ -9875,7 +10111,7 @@ pub const Tensor = struct {
     }
 
     pub fn convolutionOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_convolution_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9893,7 +10129,7 @@ pub const Tensor = struct {
     }
 
     pub fn convolutionOverrideable(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_convolution_overrideable(@ptrCast(&c_tensors), self.c_tensor,
@@ -9910,7 +10146,7 @@ pub const Tensor = struct {
     }
 
     pub fn convolutionOverrideableOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_convolution_overrideable_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9928,7 +10164,7 @@ pub const Tensor = struct {
     }
 
     pub fn copySparseToSparse(
-        self: *const Tensor, src: *Tensor, non_blocking: bool
+        self: *const Tensor, src: *const Tensor, non_blocking: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_copy_sparse_to_sparse(@ptrCast(&c_tensors), self.c_tensor,
@@ -9939,7 +10175,7 @@ pub const Tensor = struct {
     }
 
     pub fn copySparseToSparse_(
-        self: *Tensor, src: *Tensor, non_blocking: bool
+        self: *Tensor, src: *const Tensor, non_blocking: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_copy_sparse_to_sparse_(@ptrCast(&c_tensors), self.c_tensor,
@@ -9950,7 +10186,7 @@ pub const Tensor = struct {
     }
 
     pub fn copySparseToSparseOut(
-        self: *const Tensor, out: *Tensor, src: *Tensor, non_blocking: bool
+        self: *const Tensor, out: *const Tensor, src: *const Tensor, non_blocking: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_copy_sparse_to_sparse_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9962,7 +10198,7 @@ pub const Tensor = struct {
     }
 
     pub fn copysign(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_copysign(@ptrCast(&c_tensors), self.c_tensor,
@@ -9972,7 +10208,7 @@ pub const Tensor = struct {
     }
 
     pub fn copysign_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_copysign_(@ptrCast(&c_tensors), self.c_tensor,
@@ -9982,7 +10218,7 @@ pub const Tensor = struct {
     }
 
     pub fn copysignOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_copysign_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10013,7 +10249,7 @@ pub const Tensor = struct {
     }
 
     pub fn copysignScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_copysign_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10051,7 +10287,7 @@ pub const Tensor = struct {
     }
 
     pub fn cosOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cos_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10079,7 +10315,7 @@ pub const Tensor = struct {
     }
 
     pub fn coshOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cosh_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10089,7 +10325,7 @@ pub const Tensor = struct {
     }
 
     pub fn cosineEmbeddingLoss(
-        input1: *Tensor, input2: *Tensor, target: *Tensor, margin: f64, reduction: i64
+        input1: *const Tensor, input2: *const Tensor, target: *const Tensor, margin: f64, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cosine_embedding_loss(@ptrCast(&c_tensors), input1.c_tensor,
@@ -10102,7 +10338,7 @@ pub const Tensor = struct {
     }
 
     pub fn cosineSimilarity(
-        x1: *Tensor, x2: *Tensor, dim_: i64, eps: f64
+        x1: *const Tensor, x2: *const Tensor, dim_: i64, eps: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cosine_similarity(@ptrCast(&c_tensors), x1.c_tensor,
@@ -10134,7 +10370,7 @@ pub const Tensor = struct {
     }
 
     pub fn countNonzeroDimIntlistOut(
-        self: *const Tensor, out: *Tensor, dim_: []i64
+        self: *const Tensor, out: *const Tensor, dim_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_count_nonzero_dim_intlist_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10145,7 +10381,7 @@ pub const Tensor = struct {
     }
 
     pub fn countNonzeroOut(
-        self: *const Tensor, out: *Tensor, dim_: ?i64
+        self: *const Tensor, out: *const Tensor, dim_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_count_nonzero_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10156,7 +10392,7 @@ pub const Tensor = struct {
     }
 
     pub fn cov(
-        self: *const Tensor, correction: i64, fweights: ?*Tensor, aweights: ?*Tensor
+        self: *const Tensor, correction: i64, fweights: ?*const Tensor, aweights: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cov(@ptrCast(&c_tensors), self.c_tensor,
@@ -10168,7 +10404,7 @@ pub const Tensor = struct {
     }
 
     pub fn cross(
-        self: *const Tensor, other: *Tensor, dim_: ?i64
+        self: *const Tensor, other: *const Tensor, dim_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cross(@ptrCast(&c_tensors), self.c_tensor,
@@ -10179,7 +10415,7 @@ pub const Tensor = struct {
     }
 
     pub fn crossEntropyLoss(
-        self: *const Tensor, target: *Tensor, weight: ?*Tensor, reduction: i64, ignore_index: i64, label_smoothing: f64
+        self: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64, label_smoothing: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cross_entropy_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -10193,7 +10429,7 @@ pub const Tensor = struct {
     }
 
     pub fn crossOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor, dim_: ?i64
+        self: *const Tensor, out: *const Tensor, other: *const Tensor, dim_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cross_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10223,7 +10459,7 @@ pub const Tensor = struct {
     }
 
     pub fn crowIndicesCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_crow_indices_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10233,7 +10469,7 @@ pub const Tensor = struct {
     }
 
     pub fn ctcLoss(
-        log_probs: *Tensor, targets: *Tensor, input_lengths: []i64, target_lengths: []i64, blank: i64, reduction: i64, zero_infinity: bool
+        log_probs: *const Tensor, targets: *const Tensor, input_lengths: []i64, target_lengths: []i64, blank: i64, reduction: i64, zero_infinity: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ctc_loss(@ptrCast(&c_tensors), log_probs.c_tensor,
@@ -10248,7 +10484,7 @@ pub const Tensor = struct {
     }
 
     pub fn ctcLossTensor(
-        log_probs: *Tensor, targets: *Tensor, input_lengths: *Tensor, target_lengths: *Tensor, blank: i64, reduction: i64, zero_infinity: bool
+        log_probs: *const Tensor, targets: *const Tensor, input_lengths: *const Tensor, target_lengths: *const Tensor, blank: i64, reduction: i64, zero_infinity: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ctc_loss_tensor(@ptrCast(&c_tensors), log_probs.c_tensor,
@@ -10263,7 +10499,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnAffineGridGenerator(
-        theta: *Tensor, n: i64, c: i64, h: i64, w: i64
+        theta: *const Tensor, n: i64, c: i64, h: i64, w: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_affine_grid_generator(@ptrCast(&c_tensors), theta.c_tensor,
@@ -10276,7 +10512,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnAffineGridGeneratorBackward(
-        gradient: *Tensor, n: i64, c: i64, h: i64, w: i64
+        gradient: *const Tensor, n: i64, c: i64, h: i64, w: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_affine_grid_generator_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -10289,7 +10525,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnAffineGridGeneratorBackwardOut(
-        out: *Tensor, gradient: *Tensor, n: i64, c: i64, h: i64, w: i64
+        out: *const Tensor, gradient: *const Tensor, n: i64, c: i64, h: i64, w: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_affine_grid_generator_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10303,7 +10539,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnAffineGridGeneratorOut(
-        out: *Tensor, theta: *Tensor, n: i64, c: i64, h: i64, w: i64
+        out: *const Tensor, theta: *const Tensor, n: i64, c: i64, h: i64, w: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_affine_grid_generator_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10317,7 +10553,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnBatchNorm(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, running_mean: ?*Tensor, running_var: ?*Tensor, training: bool, exponential_average_factor: f64, epsilon: f64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, running_mean: ?*const Tensor, running_var: ?*const Tensor, training: bool, exponential_average_factor: f64, epsilon: f64
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg_cudnn_batch_norm(@ptrCast(&c_tensors), self.c_tensor,
@@ -10333,7 +10569,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnBatchNormBackward(
-        self: *const Tensor, grad_output: *Tensor, weight: *Tensor, running_mean: ?*Tensor, running_var: ?*Tensor, save_mean: ?*Tensor, save_var: ?*Tensor, epsilon: f64, reservespace: *Tensor
+        self: *const Tensor, grad_output: *const Tensor, weight: *const Tensor, running_mean: ?*const Tensor, running_var: ?*const Tensor, save_mean: ?*const Tensor, save_var: ?*const Tensor, epsilon: f64, reservespace: *const Tensor
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_cudnn_batch_norm_backward(@ptrCast(&c_tensors), self.c_tensor,
@@ -10350,7 +10586,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnBatchNormBackwardOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, out2: *Tensor, grad_output: *Tensor, weight: *Tensor, running_mean: ?*Tensor, running_var: ?*Tensor, save_mean: ?*Tensor, save_var: ?*Tensor, epsilon: f64, reservespace: *Tensor
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, grad_output: *const Tensor, weight: *const Tensor, running_mean: ?*const Tensor, running_var: ?*const Tensor, save_mean: ?*const Tensor, save_var: ?*const Tensor, epsilon: f64, reservespace: *const Tensor
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_cudnn_batch_norm_backward_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -10370,7 +10606,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnBatchNormOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, out2: *Tensor, out3: *Tensor, weight: *Tensor, bias: ?*Tensor, running_mean: ?*Tensor, running_var: ?*Tensor, training: bool, exponential_average_factor: f64, epsilon: f64
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, out3: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, running_mean: ?*const Tensor, running_var: ?*const Tensor, training: bool, exponential_average_factor: f64, epsilon: f64
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg_cudnn_batch_norm_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -10390,7 +10626,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnConvolution(
-        self: *const Tensor, weight: *Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool, allow_tf32: bool
+        self: *const Tensor, weight: *const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool, allow_tf32: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_convolution(@ptrCast(&c_tensors), self.c_tensor,
@@ -10407,7 +10643,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnConvolutionAddRelu(
-        self: *const Tensor, weight: *Tensor, z: *Tensor, alpha: Scalar, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, z: *const Tensor, alpha: Scalar, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_convolution_add_relu(@ptrCast(&c_tensors), self.c_tensor,
@@ -10424,7 +10660,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnConvolutionAddReluOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, z: *Tensor, alpha: Scalar, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, z: *const Tensor, alpha: Scalar, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_convolution_add_relu_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10442,7 +10678,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnConvolutionOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool, allow_tf32: bool
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool, allow_tf32: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_convolution_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10460,7 +10696,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnConvolutionRelu(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_convolution_relu(@ptrCast(&c_tensors), self.c_tensor,
@@ -10475,7 +10711,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnConvolutionReluOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_convolution_relu_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10491,7 +10727,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnConvolutionTranspose(
-        self: *const Tensor, weight: *Tensor, padding: []i64, output_padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool, allow_tf32: bool
+        self: *const Tensor, weight: *const Tensor, padding: []i64, output_padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool, allow_tf32: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_convolution_transpose(@ptrCast(&c_tensors), self.c_tensor,
@@ -10509,7 +10745,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnConvolutionTransposeOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, padding: []i64, output_padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool, allow_tf32: bool
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, padding: []i64, output_padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool, allow_tf32: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_convolution_transpose_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10528,7 +10764,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnGridSampler(
-        self: *const Tensor, grid: *Tensor
+        self: *const Tensor, grid: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_grid_sampler(@ptrCast(&c_tensors), self.c_tensor,
@@ -10538,7 +10774,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnGridSamplerBackward(
-        self: *const Tensor, grid: *Tensor, grad_output: *Tensor
+        self: *const Tensor, grid: *const Tensor, grad_output: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_cudnn_grid_sampler_backward(@ptrCast(&c_tensors), self.c_tensor,
@@ -10549,7 +10785,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnGridSamplerBackwardOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, grid: *Tensor, grad_output: *Tensor
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, grid: *const Tensor, grad_output: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_cudnn_grid_sampler_backward_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -10562,7 +10798,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnGridSamplerOut(
-        self: *const Tensor, out: *Tensor, grid: *Tensor
+        self: *const Tensor, out: *const Tensor, grid: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_grid_sampler_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10591,7 +10827,7 @@ pub const Tensor = struct {
     }
 
     pub fn cummaxOut(
-        self: *const Tensor, values_: *Tensor, indices_: *Tensor, dim_: i64
+        self: *const Tensor, values_: *const Tensor, indices_: *const Tensor, dim_: i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_cummax_out(@ptrCast(&c_tensors), values_.c_tensor,
@@ -10603,7 +10839,7 @@ pub const Tensor = struct {
     }
 
     pub fn cummaxminBackward(
-        self: *const Tensor, gradient: *Tensor, indices_: *Tensor, dim_: i64
+        self: *const Tensor, gradient: *const Tensor, indices_: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cummaxmin_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -10625,7 +10861,7 @@ pub const Tensor = struct {
     }
 
     pub fn cumminOut(
-        self: *const Tensor, values_: *Tensor, indices_: *Tensor, dim_: i64
+        self: *const Tensor, values_: *const Tensor, indices_: *const Tensor, dim_: i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_cummin_out(@ptrCast(&c_tensors), values_.c_tensor,
@@ -10659,7 +10895,7 @@ pub const Tensor = struct {
     }
 
     pub fn cumprodBackward(
-        self: *const Tensor, gradient: *Tensor, dim_: i64, output: *Tensor
+        self: *const Tensor, gradient: *const Tensor, dim_: i64, output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cumprod_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -10671,7 +10907,7 @@ pub const Tensor = struct {
     }
 
     pub fn cumprodOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, dim_: i64, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cumprod_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10705,7 +10941,7 @@ pub const Tensor = struct {
     }
 
     pub fn cumsumOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, dim_: i64, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cumsum_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10717,7 +10953,7 @@ pub const Tensor = struct {
     }
 
     pub fn cumulativeTrapezoid(
-        y: *Tensor, dim_: i64
+        y: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cumulative_trapezoid(@ptrCast(&c_tensors), y.c_tensor,
@@ -10727,7 +10963,7 @@ pub const Tensor = struct {
     }
 
     pub fn cumulativeTrapezoidX(
-        y: *Tensor, x: *Tensor, dim_: i64
+        y: *const Tensor, x: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cumulative_trapezoid_x(@ptrCast(&c_tensors), y.c_tensor,
@@ -10765,7 +11001,7 @@ pub const Tensor = struct {
     }
 
     pub fn deg2radOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_deg2rad_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10792,7 +11028,7 @@ pub const Tensor = struct {
     }
 
     pub fn dequantizeSelfOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_dequantize_self_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10802,22 +11038,22 @@ pub const Tensor = struct {
     }
 
     pub fn dequantizeTensors(
-        tensors: []*Tensor
+        tensors: []*const Tensor
     ) []Tensor {
         const c_tensors = __c.atg_dequantize_tensors(ptrList(tensors).ptr, @intCast(tensors.len));
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
 
     pub fn dequantizeTensorsOut(
-        out: []*Tensor, tensors: []*Tensor
+        out: []*const Tensor, tensors: []*const Tensor
     ) void {
         __c.atg_dequantize_tensors_out(ptrList(out).ptr, @intCast(out.len),
                 ptrList(tensors).ptr, @intCast(tensors.len));
@@ -10862,7 +11098,7 @@ pub const Tensor = struct {
     }
 
     pub fn detachCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_detach_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10894,7 +11130,7 @@ pub const Tensor = struct {
     }
 
     pub fn diagEmbedOut(
-        self: *const Tensor, out: *Tensor, offset: i64, dim1: i64, dim2: i64
+        self: *const Tensor, out: *const Tensor, offset: i64, dim1: i64, dim2: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_diag_embed_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10907,7 +11143,7 @@ pub const Tensor = struct {
     }
 
     pub fn diagOut(
-        self: *const Tensor, out: *Tensor, diagonal_: i64
+        self: *const Tensor, out: *const Tensor, diagonal_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_diag_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10940,7 +11176,7 @@ pub const Tensor = struct {
     }
 
     pub fn diagonalBackward(
-        grad_output: *Tensor, input_sizes: []i64, offset: i64, dim1: i64, dim2: i64
+        grad_output: *const Tensor, input_sizes: []i64, offset: i64, dim1: i64, dim2: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_diagonal_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -10953,7 +11189,7 @@ pub const Tensor = struct {
     }
 
     pub fn diagonalBackwardOut(
-        out: *Tensor, grad_output: *Tensor, input_sizes: []i64, offset: i64, dim1: i64, dim2: i64
+        out: *const Tensor, grad_output: *const Tensor, input_sizes: []i64, offset: i64, dim1: i64, dim2: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_diagonal_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10979,7 +11215,7 @@ pub const Tensor = struct {
     }
 
     pub fn diagonalCopyOut(
-        self: *const Tensor, out: *Tensor, offset: i64, dim1: i64, dim2: i64
+        self: *const Tensor, out: *const Tensor, offset: i64, dim1: i64, dim2: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_diagonal_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10992,7 +11228,7 @@ pub const Tensor = struct {
     }
 
     pub fn diagonalScatter(
-        self: *const Tensor, src: *Tensor, offset: i64, dim1: i64, dim2: i64
+        self: *const Tensor, src: *const Tensor, offset: i64, dim1: i64, dim2: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_diagonal_scatter(@ptrCast(&c_tensors), self.c_tensor,
@@ -11005,7 +11241,7 @@ pub const Tensor = struct {
     }
 
     pub fn diagonalScatterOut(
-        self: *const Tensor, out: *Tensor, src: *Tensor, offset: i64, dim1: i64, dim2: i64
+        self: *const Tensor, out: *const Tensor, src: *const Tensor, offset: i64, dim1: i64, dim2: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_diagonal_scatter_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11019,7 +11255,7 @@ pub const Tensor = struct {
     }
 
     pub fn diff(
-        self: *const Tensor, n: i64, dim_: i64, prepend: ?*Tensor, append: ?*Tensor
+        self: *const Tensor, n: i64, dim_: i64, prepend: ?*const Tensor, append: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_diff(@ptrCast(&c_tensors), self.c_tensor,
@@ -11032,7 +11268,7 @@ pub const Tensor = struct {
     }
 
     pub fn diffOut(
-        self: *const Tensor, out: *Tensor, n: i64, dim_: i64, prepend: ?*Tensor, append: ?*Tensor
+        self: *const Tensor, out: *const Tensor, n: i64, dim_: i64, prepend: ?*const Tensor, append: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_diff_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11064,7 +11300,7 @@ pub const Tensor = struct {
     }
 
     pub fn digammaOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_digamma_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11074,7 +11310,7 @@ pub const Tensor = struct {
     }
 
     pub fn dist(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_dist(@ptrCast(&c_tensors), self.c_tensor,
@@ -11084,7 +11320,7 @@ pub const Tensor = struct {
     }
 
     pub fn distOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_dist_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11095,7 +11331,7 @@ pub const Tensor = struct {
     }
 
     pub fn div(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div(@ptrCast(&c_tensors), self.c_tensor,
@@ -11105,7 +11341,7 @@ pub const Tensor = struct {
     }
 
     pub fn div_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_(@ptrCast(&c_tensors), self.c_tensor,
@@ -11115,7 +11351,7 @@ pub const Tensor = struct {
     }
 
     pub fn divOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11126,7 +11362,7 @@ pub const Tensor = struct {
     }
 
     pub fn divOutMode(
-        self: *const Tensor, out: *Tensor, other: *Tensor, rounding_mode: []u8
+        self: *const Tensor, out: *const Tensor, other: *const Tensor, rounding_mode: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_out_mode(@ptrCast(&c_tensors), out.c_tensor,
@@ -11158,7 +11394,7 @@ pub const Tensor = struct {
     }
 
     pub fn divScalarMode(
-        self: *const Tensor, other: Scalar, rounding_mode: []u8
+        self: *const Tensor, other: Scalar, rounding_mode: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_scalar_mode(@ptrCast(&c_tensors), self.c_tensor,
@@ -11169,7 +11405,7 @@ pub const Tensor = struct {
     }
 
     pub fn divScalarMode_(
-        self: *Tensor, other: Scalar, rounding_mode: []u8
+        self: *Tensor, other: Scalar, rounding_mode: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_scalar_mode_(@ptrCast(&c_tensors), self.c_tensor,
@@ -11180,7 +11416,7 @@ pub const Tensor = struct {
     }
 
     pub fn divScalarModeOut(
-        self: *const Tensor, out: *Tensor, other: Scalar, rounding_mode: []u8
+        self: *const Tensor, out: *const Tensor, other: Scalar, rounding_mode: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_scalar_mode_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11192,7 +11428,7 @@ pub const Tensor = struct {
     }
 
     pub fn divScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11203,7 +11439,7 @@ pub const Tensor = struct {
     }
 
     pub fn divTensorMode(
-        self: *const Tensor, other: *Tensor, rounding_mode: []u8
+        self: *const Tensor, other: *const Tensor, rounding_mode: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_tensor_mode(@ptrCast(&c_tensors), self.c_tensor,
@@ -11214,7 +11450,7 @@ pub const Tensor = struct {
     }
 
     pub fn divTensorMode_(
-        self: *Tensor, other: *Tensor, rounding_mode: []u8
+        self: *Tensor, other: *const Tensor, rounding_mode: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_tensor_mode_(@ptrCast(&c_tensors), self.c_tensor,
@@ -11225,7 +11461,7 @@ pub const Tensor = struct {
     }
 
     pub fn divide(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_divide(@ptrCast(&c_tensors), self.c_tensor,
@@ -11235,7 +11471,7 @@ pub const Tensor = struct {
     }
 
     pub fn divide_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_divide_(@ptrCast(&c_tensors), self.c_tensor,
@@ -11245,7 +11481,7 @@ pub const Tensor = struct {
     }
 
     pub fn divideOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_divide_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11256,7 +11492,7 @@ pub const Tensor = struct {
     }
 
     pub fn divideOutMode(
-        self: *const Tensor, out: *Tensor, other: *Tensor, rounding_mode: []u8
+        self: *const Tensor, out: *const Tensor, other: *const Tensor, rounding_mode: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_divide_out_mode(@ptrCast(&c_tensors), out.c_tensor,
@@ -11288,7 +11524,7 @@ pub const Tensor = struct {
     }
 
     pub fn divideScalarMode(
-        self: *const Tensor, other: Scalar, rounding_mode: []u8
+        self: *const Tensor, other: Scalar, rounding_mode: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_divide_scalar_mode(@ptrCast(&c_tensors), self.c_tensor,
@@ -11299,7 +11535,7 @@ pub const Tensor = struct {
     }
 
     pub fn divideScalarMode_(
-        self: *Tensor, other: Scalar, rounding_mode: []u8
+        self: *Tensor, other: Scalar, rounding_mode: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_divide_scalar_mode_(@ptrCast(&c_tensors), self.c_tensor,
@@ -11310,7 +11546,7 @@ pub const Tensor = struct {
     }
 
     pub fn divideTensorMode(
-        self: *const Tensor, other: *Tensor, rounding_mode: []u8
+        self: *const Tensor, other: *const Tensor, rounding_mode: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_divide_tensor_mode(@ptrCast(&c_tensors), self.c_tensor,
@@ -11321,7 +11557,7 @@ pub const Tensor = struct {
     }
 
     pub fn divideTensorMode_(
-        self: *Tensor, other: *Tensor, rounding_mode: []u8
+        self: *Tensor, other: *const Tensor, rounding_mode: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_divide_tensor_mode_(@ptrCast(&c_tensors), self.c_tensor,
@@ -11332,7 +11568,7 @@ pub const Tensor = struct {
     }
 
     pub fn dot(
-        self: *const Tensor, tensor: *Tensor
+        self: *const Tensor, tensor: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_dot(@ptrCast(&c_tensors), self.c_tensor,
@@ -11342,7 +11578,7 @@ pub const Tensor = struct {
     }
 
     pub fn dotOut(
-        self: *const Tensor, out: *Tensor, tensor: *Tensor
+        self: *const Tensor, out: *const Tensor, tensor: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_dot_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11379,13 +11615,13 @@ pub const Tensor = struct {
     ) []Tensor {
         const c_tensors = __c.atg_dsplit(self.c_tensor,
                 sections);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
@@ -11395,19 +11631,19 @@ pub const Tensor = struct {
     ) []Tensor {
         const c_tensors = __c.atg_dsplit_array(self.c_tensor,
                 indices_.ptr, @intCast(indices_.len));
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
 
     pub fn dstack(
-        tensors: []*Tensor
+        tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_dstack(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len));
@@ -11416,7 +11652,7 @@ pub const Tensor = struct {
     }
 
     pub fn dstackOut(
-        out: *Tensor, tensors: []*Tensor
+        out: *const Tensor, tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_dstack_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11426,7 +11662,7 @@ pub const Tensor = struct {
     }
 
     pub fn einsum(
-        equation: []u8, tensors: []*Tensor, path: ?[]i64
+        equation: []const u8, tensors: []*const Tensor, path: ?[]i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_einsum(@ptrCast(&c_tensors), equation.ptr, equation.len,
@@ -11455,7 +11691,7 @@ pub const Tensor = struct {
     }
 
     pub fn eluBackward(
-        grad_output: *Tensor, alpha: Scalar, scale: Scalar, input_scale: Scalar, is_result: bool, self_or_result: *Tensor
+        grad_output: *const Tensor, alpha: Scalar, scale: Scalar, input_scale: Scalar, is_result: bool, self_or_result: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_elu_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -11469,7 +11705,7 @@ pub const Tensor = struct {
     }
 
     pub fn eluBackwardGradInput(
-        grad_input: *Tensor, grad_output: *Tensor, alpha: Scalar, scale: Scalar, input_scale: Scalar, is_result: bool, self_or_result: *Tensor
+        grad_input: *const Tensor, grad_output: *const Tensor, alpha: Scalar, scale: Scalar, input_scale: Scalar, is_result: bool, self_or_result: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_elu_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -11484,7 +11720,7 @@ pub const Tensor = struct {
     }
 
     pub fn eluOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_elu_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11494,7 +11730,7 @@ pub const Tensor = struct {
     }
 
     pub fn embedding(
-        weight: *Tensor, indices_: *Tensor, padding_idx: i64, scale_grad_by_freq: bool, sparse: bool
+        weight: *const Tensor, indices_: *const Tensor, padding_idx: i64, scale_grad_by_freq: bool, sparse: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_embedding(@ptrCast(&c_tensors), weight.c_tensor,
@@ -11507,7 +11743,7 @@ pub const Tensor = struct {
     }
 
     pub fn embeddingBackward(
-        gradient: *Tensor, indices_: *Tensor, num_weights: i64, padding_idx: i64, scale_grad_by_freq: bool, sparse: bool
+        gradient: *const Tensor, indices_: *const Tensor, num_weights: i64, padding_idx: i64, scale_grad_by_freq: bool, sparse: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_embedding_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -11521,7 +11757,7 @@ pub const Tensor = struct {
     }
 
     pub fn embeddingBag(
-        weight: *Tensor, indices_: *Tensor, offsets: *Tensor, scale_grad_by_freq: bool, mode_: i64, sparse: bool, per_sample_weights: ?*Tensor, include_last_offset: bool
+        weight: *const Tensor, indices_: *const Tensor, offsets: *const Tensor, scale_grad_by_freq: bool, mode_: i64, sparse: bool, per_sample_weights: ?*const Tensor, include_last_offset: bool
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg_embedding_bag(@ptrCast(&c_tensors), weight.c_tensor,
@@ -11537,7 +11773,7 @@ pub const Tensor = struct {
     }
 
     pub fn embeddingBagPaddingIdx(
-        weight: *Tensor, indices_: *Tensor, offsets: *Tensor, scale_grad_by_freq: bool, mode_: i64, sparse: bool, per_sample_weights: ?*Tensor, include_last_offset: bool, padding_idx: ?i64
+        weight: *const Tensor, indices_: *const Tensor, offsets: *const Tensor, scale_grad_by_freq: bool, mode_: i64, sparse: bool, per_sample_weights: ?*const Tensor, include_last_offset: bool, padding_idx: ?i64
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg_embedding_bag_padding_idx(@ptrCast(&c_tensors), weight.c_tensor,
@@ -11554,7 +11790,7 @@ pub const Tensor = struct {
     }
 
     pub fn embeddingDenseBackward(
-        grad_output: *Tensor, indices_: *Tensor, num_weights: i64, padding_idx: i64, scale_grad_by_freq: bool
+        grad_output: *const Tensor, indices_: *const Tensor, num_weights: i64, padding_idx: i64, scale_grad_by_freq: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_embedding_dense_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -11567,7 +11803,7 @@ pub const Tensor = struct {
     }
 
     pub fn embeddingDenseBackwardOut(
-        out: *Tensor, grad_output: *Tensor, indices_: *Tensor, num_weights: i64, padding_idx: i64, scale_grad_by_freq: bool
+        out: *const Tensor, grad_output: *const Tensor, indices_: *const Tensor, num_weights: i64, padding_idx: i64, scale_grad_by_freq: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_embedding_dense_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11581,7 +11817,7 @@ pub const Tensor = struct {
     }
 
     pub fn embeddingOut(
-        out: *Tensor, weight: *Tensor, indices_: *Tensor, padding_idx: i64, scale_grad_by_freq: bool, sparse: bool
+        out: *const Tensor, weight: *const Tensor, indices_: *const Tensor, padding_idx: i64, scale_grad_by_freq: bool, sparse: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_embedding_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11595,7 +11831,7 @@ pub const Tensor = struct {
     }
 
     pub fn embeddingRenorm(
-        self: *const Tensor, indices_: *Tensor, max_norm: f64, norm_type: f64
+        self: *const Tensor, indices_: *const Tensor, max_norm: f64, norm_type: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_embedding_renorm(@ptrCast(&c_tensors), self.c_tensor,
@@ -11607,7 +11843,7 @@ pub const Tensor = struct {
     }
 
     pub fn embeddingRenorm_(
-        self: *Tensor, indices_: *Tensor, max_norm: f64, norm_type: f64
+        self: *Tensor, indices_: *const Tensor, max_norm: f64, norm_type: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_embedding_renorm_(@ptrCast(&c_tensors), self.c_tensor,
@@ -11619,7 +11855,7 @@ pub const Tensor = struct {
     }
 
     pub fn embeddingRenormOut(
-        self: *const Tensor, out: *Tensor, indices_: *Tensor, max_norm: f64, norm_type: f64
+        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, max_norm: f64, norm_type: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_embedding_renorm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11632,7 +11868,7 @@ pub const Tensor = struct {
     }
 
     pub fn embeddingSparseBackward(
-        gradient: *Tensor, indices_: *Tensor, num_weights: i64, padding_idx: i64, scale_grad_by_freq: bool
+        gradient: *const Tensor, indices_: *const Tensor, num_weights: i64, padding_idx: i64, scale_grad_by_freq: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_embedding_sparse_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -11645,11 +11881,11 @@ pub const Tensor = struct {
     }
 
     pub fn empty(
-        size_: []i64, options: TensorOptions
+        size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_empty(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11664,7 +11900,7 @@ pub const Tensor = struct {
     }
 
     pub fn emptyLikeOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_empty_like_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11674,7 +11910,7 @@ pub const Tensor = struct {
     }
 
     pub fn emptyOut(
-        out: *Tensor, size_: []i64
+        out: *const Tensor, size_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_empty_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11684,18 +11920,18 @@ pub const Tensor = struct {
     }
 
     pub fn emptyPermuted(
-        size_: []i64, physical_layout: []i64, options: TensorOptions
+        size_: []i64, physical_layout: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_empty_permuted(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
                 physical_layout.ptr, @intCast(physical_layout.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn emptyPermutedOut(
-        out: *Tensor, size_: []i64, physical_layout: []i64
+        out: *const Tensor, size_: []i64, physical_layout: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_empty_permuted_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11706,18 +11942,18 @@ pub const Tensor = struct {
     }
 
     pub fn emptyQuantized(
-        size_: []i64, qtensor: *Tensor, options: TensorOptions
+        size_: []i64, qtensor: *const Tensor, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_empty_quantized(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
                 qtensor.c_tensor,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn emptyQuantizedOut(
-        out: *Tensor, size_: []i64, qtensor: *Tensor
+        out: *const Tensor, size_: []i64, qtensor: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_empty_quantized_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11728,18 +11964,18 @@ pub const Tensor = struct {
     }
 
     pub fn emptyStrided(
-        size_: []i64, stride_: []i64, options: TensorOptions
+        size_: []i64, stride_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_empty_strided(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
                 stride_.ptr, @intCast(stride_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn emptyStridedOut(
-        out: *Tensor, size_: []i64, stride_: []i64
+        out: *const Tensor, size_: []i64, stride_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_empty_strided_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11770,7 +12006,7 @@ pub const Tensor = struct {
     }
 
     pub fn eqScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_eq_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11781,7 +12017,7 @@ pub const Tensor = struct {
     }
 
     pub fn eqTensor(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_eq_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -11791,7 +12027,7 @@ pub const Tensor = struct {
     }
 
     pub fn eqTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_eq_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -11801,7 +12037,7 @@ pub const Tensor = struct {
     }
 
     pub fn eqTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_eq_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11812,7 +12048,7 @@ pub const Tensor = struct {
     }
 
     pub fn equal(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) bool {
         const return_ = __c.atg_equal(self.c_tensor,
                 other.c_tensor);
@@ -11839,7 +12075,7 @@ pub const Tensor = struct {
     }
 
     pub fn erfOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_erf_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11867,7 +12103,7 @@ pub const Tensor = struct {
     }
 
     pub fn erfcOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_erfc_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11895,7 +12131,7 @@ pub const Tensor = struct {
     }
 
     pub fn erfinvOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_erfinv_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11932,7 +12168,7 @@ pub const Tensor = struct {
     }
 
     pub fn exp2Out(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_exp2_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11951,7 +12187,7 @@ pub const Tensor = struct {
     }
 
     pub fn expOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_exp_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11972,7 +12208,7 @@ pub const Tensor = struct {
     }
 
     pub fn expandAs(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_expand_as(@ptrCast(&c_tensors), self.c_tensor,
@@ -11993,7 +12229,7 @@ pub const Tensor = struct {
     }
 
     pub fn expandCopyOut(
-        self: *const Tensor, out: *Tensor, size_: []i64, implicit: bool
+        self: *const Tensor, out: *const Tensor, size_: []i64, implicit: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_expand_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12023,7 +12259,7 @@ pub const Tensor = struct {
     }
 
     pub fn expm1Out(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_expm1_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12053,7 +12289,7 @@ pub const Tensor = struct {
     }
 
     pub fn exponentialOut(
-        self: *const Tensor, out: *Tensor, lambd: f64
+        self: *const Tensor, out: *const Tensor, lambd: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_exponential_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12064,28 +12300,28 @@ pub const Tensor = struct {
     }
 
     pub fn eye(
-        n: i64, options: TensorOptions
+        n: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_eye(@ptrCast(&c_tensors), n,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn eyeM(
-        n: i64, m: i64, options: TensorOptions
+        n: i64, m: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_eye_m(@ptrCast(&c_tensors), n,
                 m,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn eyeMOut(
-        out: *Tensor, n: i64, m: i64
+        out: *const Tensor, n: i64, m: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_eye_m_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12096,7 +12332,7 @@ pub const Tensor = struct {
     }
 
     pub fn eyeOut(
-        out: *Tensor, n: i64
+        out: *const Tensor, n: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_eye_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12106,7 +12342,7 @@ pub const Tensor = struct {
     }
 
     pub fn fakeQuantizePerChannelAffine(
-        self: *const Tensor, scale: *Tensor, zero_point: *Tensor, axis: i64, quant_min: i64, quant_max: i64
+        self: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, axis: i64, quant_min: i64, quant_max: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fake_quantize_per_channel_affine(@ptrCast(&c_tensors), self.c_tensor,
@@ -12120,7 +12356,7 @@ pub const Tensor = struct {
     }
 
     pub fn fakeQuantizePerChannelAffineCachemask(
-        self: *const Tensor, scale: *Tensor, zero_point: *Tensor, axis: i64, quant_min: i64, quant_max: i64
+        self: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, axis: i64, quant_min: i64, quant_max: i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_fake_quantize_per_channel_affine_cachemask(@ptrCast(&c_tensors), self.c_tensor,
@@ -12134,7 +12370,7 @@ pub const Tensor = struct {
     }
 
     pub fn fakeQuantizePerChannelAffineCachemaskBackward(
-        gradient: *Tensor, mask: *Tensor
+        gradient: *const Tensor, mask: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fake_quantize_per_channel_affine_cachemask_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -12144,7 +12380,7 @@ pub const Tensor = struct {
     }
 
     pub fn fakeQuantizePerChannelAffineCachemaskOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, scale: *Tensor, zero_point: *Tensor, axis: i64, quant_min: i64, quant_max: i64
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, axis: i64, quant_min: i64, quant_max: i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_fake_quantize_per_channel_affine_cachemask_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -12186,7 +12422,7 @@ pub const Tensor = struct {
     }
 
     pub fn fakeQuantizePerTensorAffineCachemaskBackward(
-        gradient: *Tensor, mask: *Tensor
+        gradient: *const Tensor, mask: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fake_quantize_per_tensor_affine_cachemask_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -12196,7 +12432,7 @@ pub const Tensor = struct {
     }
 
     pub fn fakeQuantizePerTensorAffineCachemaskOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, scale: f64, zero_point: i64, quant_min: i64, quant_max: i64
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, scale: f64, zero_point: i64, quant_min: i64, quant_max: i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_fake_quantize_per_tensor_affine_cachemask_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -12211,7 +12447,7 @@ pub const Tensor = struct {
     }
 
     pub fn fakeQuantizePerTensorAffineTensorQparams(
-        self: *const Tensor, scale: *Tensor, zero_point: *Tensor, quant_min: i64, quant_max: i64
+        self: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, quant_min: i64, quant_max: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fake_quantize_per_tensor_affine_tensor_qparams(@ptrCast(&c_tensors), self.c_tensor,
@@ -12224,7 +12460,7 @@ pub const Tensor = struct {
     }
 
     pub fn fbgemmLinearFp16Weight(
-        self: *const Tensor, packed_weight: *Tensor, bias: *Tensor
+        self: *const Tensor, packed_weight: *const Tensor, bias: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fbgemm_linear_fp16_weight(@ptrCast(&c_tensors), self.c_tensor,
@@ -12235,7 +12471,7 @@ pub const Tensor = struct {
     }
 
     pub fn fbgemmLinearFp16WeightFp32Activation(
-        self: *const Tensor, packed_weight: *Tensor, bias: *Tensor
+        self: *const Tensor, packed_weight: *const Tensor, bias: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fbgemm_linear_fp16_weight_fp32_activation(@ptrCast(&c_tensors), self.c_tensor,
@@ -12246,7 +12482,7 @@ pub const Tensor = struct {
     }
 
     pub fn fbgemmLinearInt8Weight(
-        self: *const Tensor, weight: *Tensor, packed_: *Tensor, col_offsets: *Tensor, weight_scale: Scalar, weight_zero_point: Scalar, bias: *Tensor
+        self: *const Tensor, weight: *const Tensor, packed_: *const Tensor, col_offsets: *const Tensor, weight_scale: Scalar, weight_zero_point: Scalar, bias: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fbgemm_linear_int8_weight(@ptrCast(&c_tensors), self.c_tensor,
@@ -12261,7 +12497,7 @@ pub const Tensor = struct {
     }
 
     pub fn fbgemmLinearInt8WeightFp32Activation(
-        self: *const Tensor, weight: *Tensor, packed_: *Tensor, col_offsets: *Tensor, weight_scale: Scalar, weight_zero_point: Scalar, bias: *Tensor
+        self: *const Tensor, weight: *const Tensor, packed_: *const Tensor, col_offsets: *const Tensor, weight_scale: Scalar, weight_zero_point: Scalar, bias: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fbgemm_linear_int8_weight_fp32_activation(@ptrCast(&c_tensors), self.c_tensor,
@@ -12349,7 +12585,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftFft(
-        self: *const Tensor, n: ?i64, dim_: i64, norm_: []u8
+        self: *const Tensor, n: ?i64, dim_: i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fft(@ptrCast(&c_tensors), self.c_tensor,
@@ -12361,7 +12597,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftFft2(
-        self: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []u8
+        self: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fft2(@ptrCast(&c_tensors), self.c_tensor,
@@ -12373,7 +12609,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftFft2Out(
-        self: *const Tensor, out: *Tensor, s: ?[]i64, dim_: []i64, norm_: []u8
+        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fft2_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12386,7 +12622,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftFftOut(
-        self: *const Tensor, out: *Tensor, n: ?i64, dim_: i64, norm_: []u8
+        self: *const Tensor, out: *const Tensor, n: ?i64, dim_: i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fft_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12399,18 +12635,18 @@ pub const Tensor = struct {
     }
 
     pub fn fftFftfreq(
-        n: i64, d: f64, options: TensorOptions
+        n: i64, d: f64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fftfreq(@ptrCast(&c_tensors), n,
                 d,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fftFftfreqOut(
-        out: *Tensor, n: i64, d: f64
+        out: *const Tensor, n: i64, d: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fftfreq_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12421,7 +12657,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftFftn(
-        self: *const Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []u8
+        self: *const Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fftn(@ptrCast(&c_tensors), self.c_tensor,
@@ -12433,7 +12669,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftFftnOut(
-        self: *const Tensor, out: *Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []u8
+        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fftn_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12456,7 +12692,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftHfft(
-        self: *const Tensor, n: ?i64, dim_: i64, norm_: []u8
+        self: *const Tensor, n: ?i64, dim_: i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_hfft(@ptrCast(&c_tensors), self.c_tensor,
@@ -12468,7 +12704,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftHfft2(
-        self: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []u8
+        self: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_hfft2(@ptrCast(&c_tensors), self.c_tensor,
@@ -12480,7 +12716,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftHfft2Out(
-        self: *const Tensor, out: *Tensor, s: ?[]i64, dim_: []i64, norm_: []u8
+        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_hfft2_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12493,7 +12729,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftHfftOut(
-        self: *const Tensor, out: *Tensor, n: ?i64, dim_: i64, norm_: []u8
+        self: *const Tensor, out: *const Tensor, n: ?i64, dim_: i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_hfft_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12506,7 +12742,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftHfftn(
-        self: *const Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []u8
+        self: *const Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_hfftn(@ptrCast(&c_tensors), self.c_tensor,
@@ -12518,7 +12754,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftHfftnOut(
-        self: *const Tensor, out: *Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []u8
+        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_hfftn_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12531,7 +12767,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftIfft(
-        self: *const Tensor, n: ?i64, dim_: i64, norm_: []u8
+        self: *const Tensor, n: ?i64, dim_: i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ifft(@ptrCast(&c_tensors), self.c_tensor,
@@ -12543,7 +12779,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftIfft2(
-        self: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []u8
+        self: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ifft2(@ptrCast(&c_tensors), self.c_tensor,
@@ -12555,7 +12791,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftIfft2Out(
-        self: *const Tensor, out: *Tensor, s: ?[]i64, dim_: []i64, norm_: []u8
+        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ifft2_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12568,7 +12804,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftIfftOut(
-        self: *const Tensor, out: *Tensor, n: ?i64, dim_: i64, norm_: []u8
+        self: *const Tensor, out: *const Tensor, n: ?i64, dim_: i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ifft_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12581,7 +12817,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftIfftn(
-        self: *const Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []u8
+        self: *const Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ifftn(@ptrCast(&c_tensors), self.c_tensor,
@@ -12593,7 +12829,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftIfftnOut(
-        self: *const Tensor, out: *Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []u8
+        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ifftn_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12616,7 +12852,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftIhfft(
-        self: *const Tensor, n: ?i64, dim_: i64, norm_: []u8
+        self: *const Tensor, n: ?i64, dim_: i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ihfft(@ptrCast(&c_tensors), self.c_tensor,
@@ -12628,7 +12864,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftIhfft2(
-        self: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []u8
+        self: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ihfft2(@ptrCast(&c_tensors), self.c_tensor,
@@ -12640,7 +12876,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftIhfft2Out(
-        self: *const Tensor, out: *Tensor, s: ?[]i64, dim_: []i64, norm_: []u8
+        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ihfft2_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12653,7 +12889,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftIhfftOut(
-        self: *const Tensor, out: *Tensor, n: ?i64, dim_: i64, norm_: []u8
+        self: *const Tensor, out: *const Tensor, n: ?i64, dim_: i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ihfft_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12666,7 +12902,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftIhfftn(
-        self: *const Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []u8
+        self: *const Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ihfftn(@ptrCast(&c_tensors), self.c_tensor,
@@ -12678,7 +12914,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftIhfftnOut(
-        self: *const Tensor, out: *Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []u8
+        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ihfftn_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12691,7 +12927,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftIrfft(
-        self: *const Tensor, n: ?i64, dim_: i64, norm_: []u8
+        self: *const Tensor, n: ?i64, dim_: i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_irfft(@ptrCast(&c_tensors), self.c_tensor,
@@ -12703,7 +12939,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftIrfft2(
-        self: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []u8
+        self: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_irfft2(@ptrCast(&c_tensors), self.c_tensor,
@@ -12715,7 +12951,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftIrfft2Out(
-        self: *const Tensor, out: *Tensor, s: ?[]i64, dim_: []i64, norm_: []u8
+        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_irfft2_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12728,7 +12964,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftIrfftOut(
-        self: *const Tensor, out: *Tensor, n: ?i64, dim_: i64, norm_: []u8
+        self: *const Tensor, out: *const Tensor, n: ?i64, dim_: i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_irfft_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12741,7 +12977,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftIrfftn(
-        self: *const Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []u8
+        self: *const Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_irfftn(@ptrCast(&c_tensors), self.c_tensor,
@@ -12753,7 +12989,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftIrfftnOut(
-        self: *const Tensor, out: *Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []u8
+        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_irfftn_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12766,7 +13002,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftRfft(
-        self: *const Tensor, n: ?i64, dim_: i64, norm_: []u8
+        self: *const Tensor, n: ?i64, dim_: i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_rfft(@ptrCast(&c_tensors), self.c_tensor,
@@ -12778,7 +13014,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftRfft2(
-        self: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []u8
+        self: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_rfft2(@ptrCast(&c_tensors), self.c_tensor,
@@ -12790,7 +13026,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftRfft2Out(
-        self: *const Tensor, out: *Tensor, s: ?[]i64, dim_: []i64, norm_: []u8
+        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_rfft2_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12803,7 +13039,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftRfftOut(
-        self: *const Tensor, out: *Tensor, n: ?i64, dim_: i64, norm_: []u8
+        self: *const Tensor, out: *const Tensor, n: ?i64, dim_: i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_rfft_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12816,18 +13052,18 @@ pub const Tensor = struct {
     }
 
     pub fn fftRfftfreq(
-        n: i64, d: f64, options: TensorOptions
+        n: i64, d: f64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_rfftfreq(@ptrCast(&c_tensors), n,
                 d,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fftRfftfreqOut(
-        out: *Tensor, n: i64, d: f64
+        out: *const Tensor, n: i64, d: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_rfftfreq_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12838,7 +13074,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftRfftn(
-        self: *const Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []u8
+        self: *const Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_rfftn(@ptrCast(&c_tensors), self.c_tensor,
@@ -12850,7 +13086,7 @@ pub const Tensor = struct {
     }
 
     pub fn fftRfftnOut(
-        self: *const Tensor, out: *Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []u8
+        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: ?[]i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_rfftn_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12894,7 +13130,7 @@ pub const Tensor = struct {
     }
 
     pub fn fillScalarOut(
-        self: *const Tensor, out: *Tensor, value: Scalar
+        self: *const Tensor, out: *const Tensor, value: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fill_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12905,7 +13141,7 @@ pub const Tensor = struct {
     }
 
     pub fn fillTensor(
-        self: *const Tensor, value: *Tensor
+        self: *const Tensor, value: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fill_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -12915,7 +13151,7 @@ pub const Tensor = struct {
     }
 
     pub fn fillTensor_(
-        self: *Tensor, value: *Tensor
+        self: *Tensor, value: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fill_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -12925,7 +13161,7 @@ pub const Tensor = struct {
     }
 
     pub fn fillTensorOut(
-        self: *const Tensor, out: *Tensor, value: *Tensor
+        self: *const Tensor, out: *const Tensor, value: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fill_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12954,7 +13190,7 @@ pub const Tensor = struct {
     }
 
     pub fn fixOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fix_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -12975,7 +13211,7 @@ pub const Tensor = struct {
     }
 
     pub fn flattenDenseTensors(
-        tensors: []*Tensor
+        tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_flatten_dense_tensors(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len));
@@ -12994,7 +13230,7 @@ pub const Tensor = struct {
     }
 
     pub fn flipOut(
-        self: *const Tensor, out: *Tensor, dims: []i64
+        self: *const Tensor, out: *const Tensor, dims: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_flip_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13023,7 +13259,7 @@ pub const Tensor = struct {
     }
 
     pub fn floatPower(
-        self: *const Tensor, exponent: *Tensor
+        self: *const Tensor, exponent: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_float_power(@ptrCast(&c_tensors), self.c_tensor,
@@ -13043,7 +13279,7 @@ pub const Tensor = struct {
     }
 
     pub fn floatPowerScalar(
-        self_scalar: Scalar, exponent: *Tensor
+        self_scalar: Scalar, exponent: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_float_power_scalar(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
@@ -13053,7 +13289,7 @@ pub const Tensor = struct {
     }
 
     pub fn floatPowerScalarOut(
-        out: *Tensor, self_scalar: Scalar, exponent: *Tensor
+        out: *const Tensor, self_scalar: Scalar, exponent: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_float_power_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13064,7 +13300,7 @@ pub const Tensor = struct {
     }
 
     pub fn floatPowerTensor_(
-        self: *Tensor, exponent: *Tensor
+        self: *Tensor, exponent: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_float_power_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -13084,7 +13320,7 @@ pub const Tensor = struct {
     }
 
     pub fn floatPowerTensorScalarOut(
-        self: *const Tensor, out: *Tensor, exponent: Scalar
+        self: *const Tensor, out: *const Tensor, exponent: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_float_power_tensor_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13095,7 +13331,7 @@ pub const Tensor = struct {
     }
 
     pub fn floatPowerTensorTensorOut(
-        self: *const Tensor, out: *Tensor, exponent: *Tensor
+        self: *const Tensor, out: *const Tensor, exponent: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_float_power_tensor_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13124,7 +13360,7 @@ pub const Tensor = struct {
     }
 
     pub fn floorDivide(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_floor_divide(@ptrCast(&c_tensors), self.c_tensor,
@@ -13134,7 +13370,7 @@ pub const Tensor = struct {
     }
 
     pub fn floorDivide_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_floor_divide_(@ptrCast(&c_tensors), self.c_tensor,
@@ -13144,7 +13380,7 @@ pub const Tensor = struct {
     }
 
     pub fn floorDivideOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_floor_divide_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13175,7 +13411,7 @@ pub const Tensor = struct {
     }
 
     pub fn floorDivideScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_floor_divide_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13186,7 +13422,7 @@ pub const Tensor = struct {
     }
 
     pub fn floorOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_floor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13196,7 +13432,7 @@ pub const Tensor = struct {
     }
 
     pub fn fmax(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fmax(@ptrCast(&c_tensors), self.c_tensor,
@@ -13206,7 +13442,7 @@ pub const Tensor = struct {
     }
 
     pub fn fmaxOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fmax_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13217,7 +13453,7 @@ pub const Tensor = struct {
     }
 
     pub fn fmin(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fmin(@ptrCast(&c_tensors), self.c_tensor,
@@ -13227,7 +13463,7 @@ pub const Tensor = struct {
     }
 
     pub fn fminOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fmin_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13258,7 +13494,7 @@ pub const Tensor = struct {
     }
 
     pub fn fmodScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fmod_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13269,7 +13505,7 @@ pub const Tensor = struct {
     }
 
     pub fn fmodTensor(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fmod_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -13279,7 +13515,7 @@ pub const Tensor = struct {
     }
 
     pub fn fmodTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fmod_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -13289,7 +13525,7 @@ pub const Tensor = struct {
     }
 
     pub fn fmodTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fmod_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13318,7 +13554,7 @@ pub const Tensor = struct {
     }
 
     pub fn fracOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_frac_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13328,7 +13564,7 @@ pub const Tensor = struct {
     }
 
     pub fn fractionalMaxPool2d(
-        self: *const Tensor, kernel_size: []i64, output_size: []i64, random_samples: *Tensor
+        self: *const Tensor, kernel_size: []i64, output_size: []i64, random_samples: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_fractional_max_pool2d(@ptrCast(&c_tensors), self.c_tensor,
@@ -13340,7 +13576,7 @@ pub const Tensor = struct {
     }
 
     pub fn fractionalMaxPool2dBackward(
-        self: *const Tensor, grad_output: *Tensor, kernel_size: []i64, output_size: []i64, indices_: *Tensor
+        self: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, output_size: []i64, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fractional_max_pool2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -13353,7 +13589,7 @@ pub const Tensor = struct {
     }
 
     pub fn fractionalMaxPool2dBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, kernel_size: []i64, output_size: []i64, indices_: *Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, output_size: []i64, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fractional_max_pool2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -13367,7 +13603,7 @@ pub const Tensor = struct {
     }
 
     pub fn fractionalMaxPool2dOutput(
-        self: *const Tensor, output: *Tensor, indices_: *Tensor, kernel_size: []i64, output_size: []i64, random_samples: *Tensor
+        self: *const Tensor, output: *const Tensor, indices_: *const Tensor, kernel_size: []i64, output_size: []i64, random_samples: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_fractional_max_pool2d_output(@ptrCast(&c_tensors), output.c_tensor,
@@ -13381,7 +13617,7 @@ pub const Tensor = struct {
     }
 
     pub fn fractionalMaxPool3d(
-        self: *const Tensor, kernel_size: []i64, output_size: []i64, random_samples: *Tensor
+        self: *const Tensor, kernel_size: []i64, output_size: []i64, random_samples: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_fractional_max_pool3d(@ptrCast(&c_tensors), self.c_tensor,
@@ -13393,7 +13629,7 @@ pub const Tensor = struct {
     }
 
     pub fn fractionalMaxPool3dBackward(
-        self: *const Tensor, grad_output: *Tensor, kernel_size: []i64, output_size: []i64, indices_: *Tensor
+        self: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, output_size: []i64, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fractional_max_pool3d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -13406,7 +13642,7 @@ pub const Tensor = struct {
     }
 
     pub fn fractionalMaxPool3dBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, kernel_size: []i64, output_size: []i64, indices_: *Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, output_size: []i64, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fractional_max_pool3d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -13420,7 +13656,7 @@ pub const Tensor = struct {
     }
 
     pub fn fractionalMaxPool3dOutput(
-        self: *const Tensor, output: *Tensor, indices_: *Tensor, kernel_size: []i64, output_size: []i64, random_samples: *Tensor
+        self: *const Tensor, output: *const Tensor, indices_: *const Tensor, kernel_size: []i64, output_size: []i64, random_samples: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_fractional_max_pool3d_output(@ptrCast(&c_tensors), output.c_tensor,
@@ -13443,7 +13679,7 @@ pub const Tensor = struct {
     }
 
     pub fn frexpTensorOut(
-        self: *const Tensor, mantissa: *Tensor, exponent: *Tensor
+        self: *const Tensor, mantissa: *const Tensor, exponent: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_frexp_tensor_out(@ptrCast(&c_tensors), mantissa.c_tensor,
@@ -13465,7 +13701,7 @@ pub const Tensor = struct {
     }
 
     pub fn frobeniusNormOut(
-        self: *const Tensor, out: *Tensor, dim_: []i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: []i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_frobenius_norm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13477,19 +13713,19 @@ pub const Tensor = struct {
     }
 
     pub fn fromFile(
-        filename: []u8, shared: bool, size_: ?i64, options: TensorOptions
+        filename: []const u8, shared: bool, size_: ?i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_from_file(@ptrCast(&c_tensors), filename.ptr, filename.len,
                 if (shared)  1  else  0,
                 size_ orelse 0, (size_ == null),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fromFileOut(
-        out: *Tensor, filename: []u8, shared: bool, size_: ?i64
+        out: *const Tensor, filename: []const u8, shared: bool, size_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_from_file_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13501,12 +13737,12 @@ pub const Tensor = struct {
     }
 
     pub fn full(
-        size_: []i64, fill_value: Scalar, options: TensorOptions
+        size_: []i64, fill_value: Scalar, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_full(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
                 fill_value.into().c_scalar,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13522,7 +13758,7 @@ pub const Tensor = struct {
     }
 
     pub fn fullLikeOut(
-        self: *const Tensor, out: *Tensor, fill_value: Scalar
+        self: *const Tensor, out: *const Tensor, fill_value: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_full_like_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13533,7 +13769,7 @@ pub const Tensor = struct {
     }
 
     pub fn fullOut(
-        out: *Tensor, size_: []i64, fill_value: Scalar
+        out: *const Tensor, size_: []i64, fill_value: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_full_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13544,7 +13780,7 @@ pub const Tensor = struct {
     }
 
     pub fn fusedMovingAvgObsFakeQuant(
-        self: *const Tensor, observer_on: *Tensor, fake_quant_on: *Tensor, running_min: *Tensor, running_max: *Tensor, scale: *Tensor, zero_point: *Tensor, averaging_const: f64, quant_min: i64, quant_max: i64, ch_axis: i64, per_row_fake_quant: bool, symmetric_quant: bool
+        self: *const Tensor, observer_on: *const Tensor, fake_quant_on: *const Tensor, running_min: *const Tensor, running_max: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, averaging_const: f64, quant_min: i64, quant_max: i64, ch_axis: i64, per_row_fake_quant: bool, symmetric_quant: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fused_moving_avg_obs_fake_quant(@ptrCast(&c_tensors), self.c_tensor,
@@ -13565,7 +13801,7 @@ pub const Tensor = struct {
     }
 
     pub fn gather(
-        self: *const Tensor, dim_: i64, index_: *Tensor, sparse_grad: bool
+        self: *const Tensor, dim_: i64, index_: *const Tensor, sparse_grad: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gather(@ptrCast(&c_tensors), self.c_tensor,
@@ -13577,7 +13813,7 @@ pub const Tensor = struct {
     }
 
     pub fn gatherBackward(
-        self: *const Tensor, gradient: *Tensor, dim_: i64, index_: *Tensor, sparse_grad: bool
+        self: *const Tensor, gradient: *const Tensor, dim_: i64, index_: *const Tensor, sparse_grad: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gather_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -13590,7 +13826,7 @@ pub const Tensor = struct {
     }
 
     pub fn gatherOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, index_: *Tensor, sparse_grad: bool
+        self: *const Tensor, out: *const Tensor, dim_: i64, index_: *const Tensor, sparse_grad: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gather_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13603,7 +13839,7 @@ pub const Tensor = struct {
     }
 
     pub fn gcd(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gcd(@ptrCast(&c_tensors), self.c_tensor,
@@ -13613,7 +13849,7 @@ pub const Tensor = struct {
     }
 
     pub fn gcd_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gcd_(@ptrCast(&c_tensors), self.c_tensor,
@@ -13623,7 +13859,7 @@ pub const Tensor = struct {
     }
 
     pub fn gcdOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gcd_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13654,7 +13890,7 @@ pub const Tensor = struct {
     }
 
     pub fn geScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ge_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13665,7 +13901,7 @@ pub const Tensor = struct {
     }
 
     pub fn geTensor(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ge_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -13675,7 +13911,7 @@ pub const Tensor = struct {
     }
 
     pub fn geTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ge_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -13685,7 +13921,7 @@ pub const Tensor = struct {
     }
 
     pub fn geTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ge_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13696,7 +13932,7 @@ pub const Tensor = struct {
     }
 
     pub fn gelu(
-        self: *const Tensor, approximate: []u8
+        self: *const Tensor, approximate: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gelu(@ptrCast(&c_tensors), self.c_tensor,
@@ -13706,7 +13942,7 @@ pub const Tensor = struct {
     }
 
     pub fn gelu_(
-        self: *Tensor, approximate: []u8
+        self: *Tensor, approximate: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gelu_(@ptrCast(&c_tensors), self.c_tensor,
@@ -13716,7 +13952,7 @@ pub const Tensor = struct {
     }
 
     pub fn geluBackward(
-        self: *const Tensor, grad_output: *Tensor, approximate: []u8
+        self: *const Tensor, grad_output: *const Tensor, approximate: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gelu_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -13727,7 +13963,7 @@ pub const Tensor = struct {
     }
 
     pub fn geluBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, approximate: []u8
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, approximate: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gelu_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -13739,7 +13975,7 @@ pub const Tensor = struct {
     }
 
     pub fn geluOut(
-        self: *const Tensor, out: *Tensor, approximate: []u8
+        self: *const Tensor, out: *const Tensor, approximate: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gelu_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13770,7 +14006,7 @@ pub const Tensor = struct {
     }
 
     pub fn geometricOut(
-        self: *const Tensor, out: *Tensor, p: f64
+        self: *const Tensor, out: *const Tensor, p: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_geometric_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13790,7 +14026,7 @@ pub const Tensor = struct {
     }
 
     pub fn geqrfA(
-        self: *const Tensor, a: *Tensor, tau: *Tensor
+        self: *const Tensor, a: *const Tensor, tau: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_geqrf_a(@ptrCast(&c_tensors), a.c_tensor,
@@ -13801,7 +14037,7 @@ pub const Tensor = struct {
     }
 
     pub fn ger(
-        self: *const Tensor, vec2: *Tensor
+        self: *const Tensor, vec2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ger(@ptrCast(&c_tensors), self.c_tensor,
@@ -13811,7 +14047,7 @@ pub const Tensor = struct {
     }
 
     pub fn gerOut(
-        self: *const Tensor, out: *Tensor, vec2: *Tensor
+        self: *const Tensor, out: *const Tensor, vec2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ger_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13832,7 +14068,7 @@ pub const Tensor = struct {
     }
 
     pub fn gluBackward(
-        self: *const Tensor, grad_output: *Tensor, dim_: i64
+        self: *const Tensor, grad_output: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_glu_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -13843,7 +14079,7 @@ pub const Tensor = struct {
     }
 
     pub fn gluBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, dim_: i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_glu_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -13855,7 +14091,7 @@ pub const Tensor = struct {
     }
 
     pub fn gluBackwardJvp(
-        grad_x: *Tensor, grad_glu: *Tensor, x: *Tensor, dgrad_glu: *Tensor, dx: *Tensor, dim_: i64
+        grad_x: *const Tensor, grad_glu: *const Tensor, x: *const Tensor, dgrad_glu: *const Tensor, dx: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_glu_backward_jvp(@ptrCast(&c_tensors), grad_x.c_tensor,
@@ -13869,7 +14105,7 @@ pub const Tensor = struct {
     }
 
     pub fn gluBackwardJvpOut(
-        out: *Tensor, grad_x: *Tensor, grad_glu: *Tensor, x: *Tensor, dgrad_glu: *Tensor, dx: *Tensor, dim_: i64
+        out: *const Tensor, grad_x: *const Tensor, grad_glu: *const Tensor, x: *const Tensor, dgrad_glu: *const Tensor, dx: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_glu_backward_jvp_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13884,7 +14120,7 @@ pub const Tensor = struct {
     }
 
     pub fn gluJvp(
-        glu_: *Tensor, x: *Tensor, dx: *Tensor, dim_: i64
+        glu_: *const Tensor, x: *const Tensor, dx: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_glu_jvp(@ptrCast(&c_tensors), glu_.c_tensor,
@@ -13896,7 +14132,7 @@ pub const Tensor = struct {
     }
 
     pub fn gluJvpOut(
-        out: *Tensor, glu_: *Tensor, x: *Tensor, dx: *Tensor, dim_: i64
+        out: *const Tensor, glu_: *const Tensor, x: *const Tensor, dx: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_glu_jvp_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13909,7 +14145,7 @@ pub const Tensor = struct {
     }
 
     pub fn gluOut(
-        self: *const Tensor, out: *Tensor, dim_: i64
+        self: *const Tensor, out: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_glu_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13969,7 +14205,7 @@ pub const Tensor = struct {
     }
 
     pub fn greaterEqualScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_greater_equal_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -13980,7 +14216,7 @@ pub const Tensor = struct {
     }
 
     pub fn greaterEqualTensor(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_greater_equal_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -13990,7 +14226,7 @@ pub const Tensor = struct {
     }
 
     pub fn greaterEqualTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_greater_equal_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -14000,7 +14236,7 @@ pub const Tensor = struct {
     }
 
     pub fn greaterEqualTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_greater_equal_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14011,7 +14247,7 @@ pub const Tensor = struct {
     }
 
     pub fn greaterScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_greater_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14022,7 +14258,7 @@ pub const Tensor = struct {
     }
 
     pub fn greaterTensor(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_greater_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -14032,7 +14268,7 @@ pub const Tensor = struct {
     }
 
     pub fn greaterTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_greater_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -14042,7 +14278,7 @@ pub const Tensor = struct {
     }
 
     pub fn greaterTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_greater_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14053,7 +14289,7 @@ pub const Tensor = struct {
     }
 
     pub fn gridSampler(
-        self: *const Tensor, grid: *Tensor, interpolation_mode: i64, padding_mode: i64, align_corners: bool
+        self: *const Tensor, grid: *const Tensor, interpolation_mode: i64, padding_mode: i64, align_corners: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_grid_sampler(@ptrCast(&c_tensors), self.c_tensor,
@@ -14066,7 +14302,7 @@ pub const Tensor = struct {
     }
 
     pub fn gridSampler2d(
-        self: *const Tensor, grid: *Tensor, interpolation_mode: i64, padding_mode: i64, align_corners: bool
+        self: *const Tensor, grid: *const Tensor, interpolation_mode: i64, padding_mode: i64, align_corners: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_grid_sampler_2d(@ptrCast(&c_tensors), self.c_tensor,
@@ -14079,7 +14315,7 @@ pub const Tensor = struct {
     }
 
     pub fn gridSampler2dOut(
-        self: *const Tensor, out: *Tensor, grid: *Tensor, interpolation_mode: i64, padding_mode: i64, align_corners: bool
+        self: *const Tensor, out: *const Tensor, grid: *const Tensor, interpolation_mode: i64, padding_mode: i64, align_corners: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_grid_sampler_2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14093,7 +14329,7 @@ pub const Tensor = struct {
     }
 
     pub fn gridSampler3d(
-        self: *const Tensor, grid: *Tensor, interpolation_mode: i64, padding_mode: i64, align_corners: bool
+        self: *const Tensor, grid: *const Tensor, interpolation_mode: i64, padding_mode: i64, align_corners: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_grid_sampler_3d(@ptrCast(&c_tensors), self.c_tensor,
@@ -14106,7 +14342,7 @@ pub const Tensor = struct {
     }
 
     pub fn gridSampler3dOut(
-        self: *const Tensor, out: *Tensor, grid: *Tensor, interpolation_mode: i64, padding_mode: i64, align_corners: bool
+        self: *const Tensor, out: *const Tensor, grid: *const Tensor, interpolation_mode: i64, padding_mode: i64, align_corners: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_grid_sampler_3d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14120,7 +14356,7 @@ pub const Tensor = struct {
     }
 
     pub fn groupNorm(
-        self: *const Tensor, num_groups: i64, weight: ?*Tensor, bias: ?*Tensor, eps: f64, cudnn_enabled: bool
+        self: *const Tensor, num_groups: i64, weight: ?*const Tensor, bias: ?*const Tensor, eps: f64, cudnn_enabled: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_group_norm(@ptrCast(&c_tensors), self.c_tensor,
@@ -14134,7 +14370,7 @@ pub const Tensor = struct {
     }
 
     pub fn gru(
-        self: *const Tensor, hx: *Tensor, params: []*Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool, batch_first: bool
+        self: *const Tensor, hx: *const Tensor, params: []*const Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool, batch_first: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_gru(@ptrCast(&c_tensors), self.c_tensor,
@@ -14151,7 +14387,7 @@ pub const Tensor = struct {
     }
 
     pub fn gruCell(
-        self: *const Tensor, hx: *Tensor, w_ih: *Tensor, w_hh: *Tensor, b_ih: ?*Tensor, b_hh: ?*Tensor
+        self: *const Tensor, hx: *const Tensor, w_ih: *const Tensor, w_hh: *const Tensor, b_ih: ?*const Tensor, b_hh: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gru_cell(@ptrCast(&c_tensors), self.c_tensor,
@@ -14165,7 +14401,7 @@ pub const Tensor = struct {
     }
 
     pub fn gruData(
-        data_: *Tensor, batch_sizes: *Tensor, hx: *Tensor, params: []*Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool
+        data_: *const Tensor, batch_sizes: *const Tensor, hx: *const Tensor, params: []*const Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_gru_data(@ptrCast(&c_tensors), data_.c_tensor,
@@ -14202,7 +14438,7 @@ pub const Tensor = struct {
     }
 
     pub fn gtScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gt_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14213,7 +14449,7 @@ pub const Tensor = struct {
     }
 
     pub fn gtTensor(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gt_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -14223,7 +14459,7 @@ pub const Tensor = struct {
     }
 
     pub fn gtTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gt_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -14233,7 +14469,7 @@ pub const Tensor = struct {
     }
 
     pub fn gtTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gt_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14244,17 +14480,17 @@ pub const Tensor = struct {
     }
 
     pub fn hammingWindow(
-        window_length: i64, options: TensorOptions
+        window_length: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hamming_window(@ptrCast(&c_tensors), window_length,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn hammingWindowOut(
-        out: *Tensor, window_length: i64
+        out: *const Tensor, window_length: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hamming_window_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14264,43 +14500,43 @@ pub const Tensor = struct {
     }
 
     pub fn hammingWindowPeriodic(
-        window_length: i64, periodic: bool, options: TensorOptions
+        window_length: i64, periodic: bool, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hamming_window_periodic(@ptrCast(&c_tensors), window_length,
                 if (periodic)  1  else  0,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn hammingWindowPeriodicAlpha(
-        window_length: i64, periodic: bool, alpha: f64, options: TensorOptions
+        window_length: i64, periodic: bool, alpha: f64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hamming_window_periodic_alpha(@ptrCast(&c_tensors), window_length,
                 if (periodic)  1  else  0,
                 alpha,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn hammingWindowPeriodicAlphaBeta(
-        window_length: i64, periodic: bool, alpha: f64, beta: f64, options: TensorOptions
+        window_length: i64, periodic: bool, alpha: f64, beta: f64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hamming_window_periodic_alpha_beta(@ptrCast(&c_tensors), window_length,
                 if (periodic)  1  else  0,
                 alpha,
                 beta,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn hammingWindowPeriodicAlphaBetaOut(
-        out: *Tensor, window_length: i64, periodic: bool, alpha: f64, beta: f64
+        out: *const Tensor, window_length: i64, periodic: bool, alpha: f64, beta: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hamming_window_periodic_alpha_beta_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14313,7 +14549,7 @@ pub const Tensor = struct {
     }
 
     pub fn hammingWindowPeriodicAlphaOut(
-        out: *Tensor, window_length: i64, periodic: bool, alpha: f64
+        out: *const Tensor, window_length: i64, periodic: bool, alpha: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hamming_window_periodic_alpha_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14325,7 +14561,7 @@ pub const Tensor = struct {
     }
 
     pub fn hammingWindowPeriodicOut(
-        out: *Tensor, window_length: i64, periodic: bool
+        out: *const Tensor, window_length: i64, periodic: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hamming_window_periodic_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14336,17 +14572,17 @@ pub const Tensor = struct {
     }
 
     pub fn hannWindow(
-        window_length: i64, options: TensorOptions
+        window_length: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hann_window(@ptrCast(&c_tensors), window_length,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn hannWindowOut(
-        out: *Tensor, window_length: i64
+        out: *const Tensor, window_length: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hann_window_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14356,18 +14592,18 @@ pub const Tensor = struct {
     }
 
     pub fn hannWindowPeriodic(
-        window_length: i64, periodic: bool, options: TensorOptions
+        window_length: i64, periodic: bool, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hann_window_periodic(@ptrCast(&c_tensors), window_length,
                 if (periodic)  1  else  0,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn hannWindowPeriodicOut(
-        out: *Tensor, window_length: i64, periodic: bool
+        out: *const Tensor, window_length: i64, periodic: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hann_window_periodic_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14387,7 +14623,7 @@ pub const Tensor = struct {
     }
 
     pub fn hardshrinkBackward(
-        self: *const Tensor, grad_out: *Tensor, lambd: Scalar
+        self: *const Tensor, grad_out: *const Tensor, lambd: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hardshrink_backward(@ptrCast(&c_tensors), grad_out.c_tensor,
@@ -14398,7 +14634,7 @@ pub const Tensor = struct {
     }
 
     pub fn hardshrinkBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_out: *Tensor, lambd: Scalar
+        self: *const Tensor, grad_input: *const Tensor, grad_out: *const Tensor, lambd: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hardshrink_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -14410,7 +14646,7 @@ pub const Tensor = struct {
     }
 
     pub fn hardshrinkOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hardshrink_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14438,7 +14674,7 @@ pub const Tensor = struct {
     }
 
     pub fn hardsigmoidBackward(
-        self: *const Tensor, grad_output: *Tensor
+        self: *const Tensor, grad_output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hardsigmoid_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -14448,7 +14684,7 @@ pub const Tensor = struct {
     }
 
     pub fn hardsigmoidBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hardsigmoid_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -14459,7 +14695,7 @@ pub const Tensor = struct {
     }
 
     pub fn hardsigmoidOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hardsigmoid_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14487,7 +14723,7 @@ pub const Tensor = struct {
     }
 
     pub fn hardswishBackward(
-        self: *const Tensor, grad_output: *Tensor
+        self: *const Tensor, grad_output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hardswish_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -14497,7 +14733,7 @@ pub const Tensor = struct {
     }
 
     pub fn hardswishBackwardOut(
-        self: *const Tensor, out: *Tensor, grad_output: *Tensor
+        self: *const Tensor, out: *const Tensor, grad_output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hardswish_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14508,7 +14744,7 @@ pub const Tensor = struct {
     }
 
     pub fn hardswishOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hardswish_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14536,7 +14772,7 @@ pub const Tensor = struct {
     }
 
     pub fn hardtanhBackward(
-        self: *const Tensor, grad_output: *Tensor, min_val: Scalar, max_val: Scalar
+        self: *const Tensor, grad_output: *const Tensor, min_val: Scalar, max_val: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hardtanh_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -14548,7 +14784,7 @@ pub const Tensor = struct {
     }
 
     pub fn hardtanhBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, min_val: Scalar, max_val: Scalar
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, min_val: Scalar, max_val: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hardtanh_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -14561,7 +14797,7 @@ pub const Tensor = struct {
     }
 
     pub fn hardtanhOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hardtanh_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14571,7 +14807,7 @@ pub const Tensor = struct {
     }
 
     pub fn heaviside(
-        self: *const Tensor, values_: *Tensor
+        self: *const Tensor, values_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_heaviside(@ptrCast(&c_tensors), self.c_tensor,
@@ -14581,7 +14817,7 @@ pub const Tensor = struct {
     }
 
     pub fn heaviside_(
-        self: *Tensor, values_: *Tensor
+        self: *Tensor, values_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_heaviside_(@ptrCast(&c_tensors), self.c_tensor,
@@ -14591,7 +14827,7 @@ pub const Tensor = struct {
     }
 
     pub fn heavisideOut(
-        self: *const Tensor, out: *Tensor, values_: *Tensor
+        self: *const Tensor, out: *const Tensor, values_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_heaviside_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14602,7 +14838,7 @@ pub const Tensor = struct {
     }
 
     pub fn hingeEmbeddingLoss(
-        self: *const Tensor, target: *Tensor, margin: f64, reduction: i64
+        self: *const Tensor, target: *const Tensor, margin: f64, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hinge_embedding_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -14624,7 +14860,7 @@ pub const Tensor = struct {
     }
 
     pub fn histcOut(
-        self: *const Tensor, out: *Tensor, bins: i64
+        self: *const Tensor, out: *const Tensor, bins: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_histc_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14635,7 +14871,7 @@ pub const Tensor = struct {
     }
 
     pub fn histogram(
-        self: *const Tensor, bins: *Tensor, weight: ?*Tensor, density: bool
+        self: *const Tensor, bins: *const Tensor, weight: ?*const Tensor, density: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_histogram(@ptrCast(&c_tensors), self.c_tensor,
@@ -14647,7 +14883,7 @@ pub const Tensor = struct {
     }
 
     pub fn histogramBinCt(
-        self: *const Tensor, bins: i64, range_: []f64, weight: ?*Tensor, density: bool
+        self: *const Tensor, bins: i64, range_: []f64, weight: ?*const Tensor, density: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_histogram_bin_ct(@ptrCast(&c_tensors), self.c_tensor,
@@ -14660,7 +14896,7 @@ pub const Tensor = struct {
     }
 
     pub fn histogramBinCtOut(
-        self: *const Tensor, hist: *Tensor, bin_edges: *Tensor, bins: i64, range_: []f64, weight: ?*Tensor, density: bool
+        self: *const Tensor, hist: *const Tensor, bin_edges: *const Tensor, bins: i64, range_: []f64, weight: ?*const Tensor, density: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_histogram_bin_ct_out(@ptrCast(&c_tensors), hist.c_tensor,
@@ -14675,7 +14911,7 @@ pub const Tensor = struct {
     }
 
     pub fn histogramBinsTensorOut(
-        self: *const Tensor, hist: *Tensor, bin_edges: *Tensor, bins: *Tensor, weight: ?*Tensor, density: bool
+        self: *const Tensor, hist: *const Tensor, bin_edges: *const Tensor, bins: *const Tensor, weight: ?*const Tensor, density: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_histogram_bins_tensor_out(@ptrCast(&c_tensors), hist.c_tensor,
@@ -14693,13 +14929,13 @@ pub const Tensor = struct {
     ) []Tensor {
         const c_tensors = __c.atg_hsplit(self.c_tensor,
                 sections);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
@@ -14709,19 +14945,19 @@ pub const Tensor = struct {
     ) []Tensor {
         const c_tensors = __c.atg_hsplit_array(self.c_tensor,
                 indices_.ptr, @intCast(indices_.len));
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
 
     pub fn hspmm(
-        mat1: *Tensor, mat2: *Tensor
+        mat1: *const Tensor, mat2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hspmm(@ptrCast(&c_tensors), mat1.c_tensor,
@@ -14731,7 +14967,7 @@ pub const Tensor = struct {
     }
 
     pub fn hspmmOut(
-        out: *Tensor, mat1: *Tensor, mat2: *Tensor
+        out: *const Tensor, mat1: *const Tensor, mat2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hspmm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14742,7 +14978,7 @@ pub const Tensor = struct {
     }
 
     pub fn hstack(
-        tensors: []*Tensor
+        tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hstack(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len));
@@ -14751,7 +14987,7 @@ pub const Tensor = struct {
     }
 
     pub fn hstackOut(
-        out: *Tensor, tensors: []*Tensor
+        out: *const Tensor, tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hstack_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14761,7 +14997,7 @@ pub const Tensor = struct {
     }
 
     pub fn huberLoss(
-        self: *const Tensor, target: *Tensor, reduction: i64, delta: f64
+        self: *const Tensor, target: *const Tensor, reduction: i64, delta: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_huber_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -14773,7 +15009,7 @@ pub const Tensor = struct {
     }
 
     pub fn huberLossBackward(
-        self: *const Tensor, grad_output: *Tensor, target: *Tensor, reduction: i64, delta: f64
+        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64, delta: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_huber_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -14786,7 +15022,7 @@ pub const Tensor = struct {
     }
 
     pub fn huberLossBackwardOut(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, target: *Tensor, reduction: i64, delta: f64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64, delta: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_huber_loss_backward_out(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -14800,7 +15036,7 @@ pub const Tensor = struct {
     }
 
     pub fn huberLossOut(
-        self: *const Tensor, out: *Tensor, target: *Tensor, reduction: i64, delta: f64
+        self: *const Tensor, out: *const Tensor, target: *const Tensor, reduction: i64, delta: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_huber_loss_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14813,7 +15049,7 @@ pub const Tensor = struct {
     }
 
     pub fn hypot(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hypot(@ptrCast(&c_tensors), self.c_tensor,
@@ -14823,7 +15059,7 @@ pub const Tensor = struct {
     }
 
     pub fn hypot_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hypot_(@ptrCast(&c_tensors), self.c_tensor,
@@ -14833,7 +15069,7 @@ pub const Tensor = struct {
     }
 
     pub fn hypotOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hypot_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14862,7 +15098,7 @@ pub const Tensor = struct {
     }
 
     pub fn i0Out(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_i0_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14872,7 +15108,7 @@ pub const Tensor = struct {
     }
 
     pub fn igamma(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_igamma(@ptrCast(&c_tensors), self.c_tensor,
@@ -14882,7 +15118,7 @@ pub const Tensor = struct {
     }
 
     pub fn igamma_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_igamma_(@ptrCast(&c_tensors), self.c_tensor,
@@ -14892,7 +15128,7 @@ pub const Tensor = struct {
     }
 
     pub fn igammaOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_igamma_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14903,7 +15139,7 @@ pub const Tensor = struct {
     }
 
     pub fn igammac(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_igammac(@ptrCast(&c_tensors), self.c_tensor,
@@ -14913,7 +15149,7 @@ pub const Tensor = struct {
     }
 
     pub fn igammac_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_igammac_(@ptrCast(&c_tensors), self.c_tensor,
@@ -14923,7 +15159,7 @@ pub const Tensor = struct {
     }
 
     pub fn igammacOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_igammac_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14947,7 +15183,7 @@ pub const Tensor = struct {
     }
 
     pub fn im2colOut(
-        self: *const Tensor, out: *Tensor, kernel_size: []i64, dilation: []i64, padding: []i64, stride_: []i64
+        self: *const Tensor, out: *const Tensor, kernel_size: []i64, dilation: []i64, padding: []i64, stride_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_im2col_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -14970,7 +15206,7 @@ pub const Tensor = struct {
     }
 
     pub fn index(
-        self: *const Tensor, indices_: []?*Tensor
+        self: *const Tensor, indices_: []?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index(@ptrCast(&c_tensors), self.c_tensor,
@@ -14980,7 +15216,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexAdd(
-        self: *const Tensor, dim_: i64, index_: *Tensor, source: *Tensor
+        self: *const Tensor, dim_: i64, index_: *const Tensor, source: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_add(@ptrCast(&c_tensors), self.c_tensor,
@@ -14992,7 +15228,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexAdd_(
-        self: *Tensor, dim_: i64, index_: *Tensor, source: *Tensor
+        self: *Tensor, dim_: i64, index_: *const Tensor, source: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_add_(@ptrCast(&c_tensors), self.c_tensor,
@@ -15004,7 +15240,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexAddOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, index_: *Tensor, source: *Tensor
+        self: *const Tensor, out: *const Tensor, dim_: i64, index_: *const Tensor, source: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_add_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15017,7 +15253,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexCopy(
-        self: *const Tensor, dim_: i64, index_: *Tensor, source: *Tensor
+        self: *const Tensor, dim_: i64, index_: *const Tensor, source: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_copy(@ptrCast(&c_tensors), self.c_tensor,
@@ -15029,7 +15265,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexCopy_(
-        self: *Tensor, dim_: i64, index_: *Tensor, source: *Tensor
+        self: *Tensor, dim_: i64, index_: *const Tensor, source: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_copy_(@ptrCast(&c_tensors), self.c_tensor,
@@ -15041,7 +15277,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexCopyOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, index_: *Tensor, source: *Tensor
+        self: *const Tensor, out: *const Tensor, dim_: i64, index_: *const Tensor, source: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15054,7 +15290,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexFill(
-        self: *const Tensor, dim_: i64, index_: *Tensor, value: Scalar
+        self: *const Tensor, dim_: i64, index_: *const Tensor, value: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_fill(@ptrCast(&c_tensors), self.c_tensor,
@@ -15066,7 +15302,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexFill_(
-        self: *Tensor, dim_: i64, index_: *Tensor, value: Scalar
+        self: *Tensor, dim_: i64, index_: *const Tensor, value: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_fill_(@ptrCast(&c_tensors), self.c_tensor,
@@ -15078,7 +15314,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexFillIntScalarOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, index_: *Tensor, value: Scalar
+        self: *const Tensor, out: *const Tensor, dim_: i64, index_: *const Tensor, value: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_fill_int_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15091,7 +15327,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexFillIntTensor(
-        self: *const Tensor, dim_: i64, index_: *Tensor, value: *Tensor
+        self: *const Tensor, dim_: i64, index_: *const Tensor, value: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_fill_int_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -15103,7 +15339,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexFillIntTensor_(
-        self: *Tensor, dim_: i64, index_: *Tensor, value: *Tensor
+        self: *Tensor, dim_: i64, index_: *const Tensor, value: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_fill_int_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -15115,7 +15351,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexFillIntTensorOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, index_: *Tensor, value: *Tensor
+        self: *const Tensor, out: *const Tensor, dim_: i64, index_: *const Tensor, value: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_fill_int_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15128,7 +15364,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexPut(
-        self: *const Tensor, indices_: []?*Tensor, values_: *Tensor, accumulate: bool
+        self: *const Tensor, indices_: []?*const Tensor, values_: *const Tensor, accumulate: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_put(@ptrCast(&c_tensors), self.c_tensor,
@@ -15140,7 +15376,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexPut_(
-        self: *Tensor, indices_: []?*Tensor, values_: *Tensor, accumulate: bool
+        self: *Tensor, indices_: []?*const Tensor, values_: *const Tensor, accumulate: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_put_(@ptrCast(&c_tensors), self.c_tensor,
@@ -15152,7 +15388,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexPutOut(
-        self: *const Tensor, out: *Tensor, indices_: []?*Tensor, values_: *Tensor, accumulate: bool
+        self: *const Tensor, out: *const Tensor, indices_: []?*const Tensor, values_: *const Tensor, accumulate: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_put_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15165,7 +15401,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexReduce(
-        self: *const Tensor, dim_: i64, index_: *Tensor, source: *Tensor, reduce: []u8, include_self: bool
+        self: *const Tensor, dim_: i64, index_: *const Tensor, source: *const Tensor, reduce: []const u8, include_self: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_reduce(@ptrCast(&c_tensors), self.c_tensor,
@@ -15179,7 +15415,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexReduce_(
-        self: *Tensor, dim_: i64, index_: *Tensor, source: *Tensor, reduce: []u8, include_self: bool
+        self: *Tensor, dim_: i64, index_: *const Tensor, source: *const Tensor, reduce: []const u8, include_self: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_reduce_(@ptrCast(&c_tensors), self.c_tensor,
@@ -15193,7 +15429,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexReduceOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, index_: *Tensor, source: *Tensor, reduce: []u8, include_self: bool
+        self: *const Tensor, out: *const Tensor, dim_: i64, index_: *const Tensor, source: *const Tensor, reduce: []const u8, include_self: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_reduce_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15208,7 +15444,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexSelect(
-        self: *const Tensor, dim_: i64, index_: *Tensor
+        self: *const Tensor, dim_: i64, index_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_select(@ptrCast(&c_tensors), self.c_tensor,
@@ -15219,7 +15455,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexSelectBackward(
-        gradient: *Tensor, self_sizes: []i64, dim_: i64, index_: *Tensor
+        gradient: *const Tensor, self_sizes: []i64, dim_: i64, index_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_select_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -15231,7 +15467,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexSelectOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, index_: *Tensor
+        self: *const Tensor, out: *const Tensor, dim_: i64, index_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_select_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15243,7 +15479,7 @@ pub const Tensor = struct {
     }
 
     pub fn indexTensorOut(
-        self: *const Tensor, out: *Tensor, indices_: []?*Tensor
+        self: *const Tensor, out: *const Tensor, indices_: []?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15272,7 +15508,7 @@ pub const Tensor = struct {
     }
 
     pub fn indicesCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_indices_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15282,7 +15518,7 @@ pub const Tensor = struct {
     }
 
     pub fn infinitelyDifferentiableGeluBackward(
-        self: *const Tensor, gradient: *Tensor
+        self: *const Tensor, gradient: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_infinitely_differentiable_gelu_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -15292,7 +15528,7 @@ pub const Tensor = struct {
     }
 
     pub fn inner(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_inner(@ptrCast(&c_tensors), self.c_tensor,
@@ -15302,7 +15538,7 @@ pub const Tensor = struct {
     }
 
     pub fn innerOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_inner_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15313,7 +15549,7 @@ pub const Tensor = struct {
     }
 
     pub fn instanceNorm(
-        self: *const Tensor, weight: ?*Tensor, bias: ?*Tensor, running_mean: ?*Tensor, running_var: ?*Tensor, use_input_stats: bool, momentum: f64, eps: f64, cudnn_enabled: bool
+        self: *const Tensor, weight: ?*const Tensor, bias: ?*const Tensor, running_mean: ?*const Tensor, running_var: ?*const Tensor, use_input_stats: bool, momentum: f64, eps: f64, cudnn_enabled: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_instance_norm(@ptrCast(&c_tensors), self.c_tensor,
@@ -15339,7 +15575,7 @@ pub const Tensor = struct {
     }
 
     pub fn intReprOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_int_repr_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15358,7 +15594,7 @@ pub const Tensor = struct {
     }
 
     pub fn inverseOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_inverse_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15449,7 +15685,7 @@ pub const Tensor = struct {
     }
 
     pub fn isSameSize(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) bool {
         const return_ = __c.atg_is_same_size(self.c_tensor,
                 other.c_tensor);
@@ -15458,7 +15694,7 @@ pub const Tensor = struct {
     }
 
     pub fn isSetTo(
-        self: *const Tensor, tensor: *Tensor
+        self: *const Tensor, tensor: *const Tensor
     ) bool {
         const return_ = __c.atg_is_set_to(self.c_tensor,
                 tensor.c_tensor);
@@ -15483,7 +15719,7 @@ pub const Tensor = struct {
     }
 
     pub fn isclose(
-        self: *const Tensor, other: *Tensor, rtol: f64, atol: f64, equal_nan: bool
+        self: *const Tensor, other: *const Tensor, rtol: f64, atol: f64, equal_nan: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_isclose(@ptrCast(&c_tensors), self.c_tensor,
@@ -15505,7 +15741,7 @@ pub const Tensor = struct {
     }
 
     pub fn isin(
-        elements: *Tensor, test_elements: *Tensor, assume_unique: bool, invert: bool
+        elements: *const Tensor, test_elements: *const Tensor, assume_unique: bool, invert: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_isin(@ptrCast(&c_tensors), elements.c_tensor,
@@ -15517,7 +15753,7 @@ pub const Tensor = struct {
     }
 
     pub fn isinScalarTensor(
-        element: Scalar, test_elements: *Tensor, assume_unique: bool, invert: bool
+        element: Scalar, test_elements: *const Tensor, assume_unique: bool, invert: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_isin_scalar_tensor(@ptrCast(&c_tensors), element.into().c_scalar,
@@ -15529,7 +15765,7 @@ pub const Tensor = struct {
     }
 
     pub fn isinScalarTensorOut(
-        out: *Tensor, element: Scalar, test_elements: *Tensor, assume_unique: bool, invert: bool
+        out: *const Tensor, element: Scalar, test_elements: *const Tensor, assume_unique: bool, invert: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_isin_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15542,7 +15778,7 @@ pub const Tensor = struct {
     }
 
     pub fn isinTensorScalar(
-        elements: *Tensor, test_element: Scalar, assume_unique: bool, invert: bool
+        elements: *const Tensor, test_element: Scalar, assume_unique: bool, invert: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_isin_tensor_scalar(@ptrCast(&c_tensors), elements.c_tensor,
@@ -15554,7 +15790,7 @@ pub const Tensor = struct {
     }
 
     pub fn isinTensorScalarOut(
-        out: *Tensor, elements: *Tensor, test_element: Scalar, assume_unique: bool, invert: bool
+        out: *const Tensor, elements: *const Tensor, test_element: Scalar, assume_unique: bool, invert: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_isin_tensor_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15567,7 +15803,7 @@ pub const Tensor = struct {
     }
 
     pub fn isinTensorTensorOut(
-        out: *Tensor, elements: *Tensor, test_elements: *Tensor, assume_unique: bool, invert: bool
+        out: *const Tensor, elements: *const Tensor, test_elements: *const Tensor, assume_unique: bool, invert: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_isin_tensor_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15589,7 +15825,7 @@ pub const Tensor = struct {
     }
 
     pub fn isinfOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_isinf_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15608,7 +15844,7 @@ pub const Tensor = struct {
     }
 
     pub fn isnanOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_isnan_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15627,7 +15863,7 @@ pub const Tensor = struct {
     }
 
     pub fn isneginfOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_isneginf_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15646,7 +15882,7 @@ pub const Tensor = struct {
     }
 
     pub fn isposinfOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_isposinf_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15665,7 +15901,7 @@ pub const Tensor = struct {
     }
 
     pub fn istft(
-        self: *const Tensor, n_fft: i64, hop_length: ?i64, win_length: ?i64, window: ?*Tensor, center: bool, normalized: bool, onesided: bool, length: ?i64, return_complex: bool
+        self: *const Tensor, n_fft: i64, hop_length: ?i64, win_length: ?i64, window: ?*const Tensor, center: bool, normalized: bool, onesided: bool, length: ?i64, return_complex: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_istft(@ptrCast(&c_tensors), self.c_tensor,
@@ -15683,29 +15919,29 @@ pub const Tensor = struct {
     }
 
     pub fn kaiserWindow(
-        window_length: i64, options: TensorOptions
+        window_length: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_kaiser_window(@ptrCast(&c_tensors), window_length,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn kaiserWindowBeta(
-        window_length: i64, periodic: bool, beta: f64, options: TensorOptions
+        window_length: i64, periodic: bool, beta: f64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_kaiser_window_beta(@ptrCast(&c_tensors), window_length,
                 if (periodic)  1  else  0,
                 beta,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn kaiserWindowBetaOut(
-        out: *Tensor, window_length: i64, periodic: bool, beta: f64
+        out: *const Tensor, window_length: i64, periodic: bool, beta: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_kaiser_window_beta_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15717,7 +15953,7 @@ pub const Tensor = struct {
     }
 
     pub fn kaiserWindowOut(
-        out: *Tensor, window_length: i64
+        out: *const Tensor, window_length: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_kaiser_window_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15727,18 +15963,18 @@ pub const Tensor = struct {
     }
 
     pub fn kaiserWindowPeriodic(
-        window_length: i64, periodic: bool, options: TensorOptions
+        window_length: i64, periodic: bool, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_kaiser_window_periodic(@ptrCast(&c_tensors), window_length,
                 if (periodic)  1  else  0,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn kaiserWindowPeriodicOut(
-        out: *Tensor, window_length: i64, periodic: bool
+        out: *const Tensor, window_length: i64, periodic: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_kaiser_window_periodic_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15749,7 +15985,7 @@ pub const Tensor = struct {
     }
 
     pub fn klDiv(
-        self: *const Tensor, target: *Tensor, reduction: i64, log_target: bool
+        self: *const Tensor, target: *const Tensor, reduction: i64, log_target: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_kl_div(@ptrCast(&c_tensors), self.c_tensor,
@@ -15761,7 +15997,7 @@ pub const Tensor = struct {
     }
 
     pub fn kron(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_kron(@ptrCast(&c_tensors), self.c_tensor,
@@ -15771,7 +16007,7 @@ pub const Tensor = struct {
     }
 
     pub fn kronOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_kron_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15794,7 +16030,7 @@ pub const Tensor = struct {
     }
 
     pub fn kthvalueValues(
-        self: *const Tensor, values_: *Tensor, indices_: *Tensor, k: i64, dim_: i64, keepdim: bool
+        self: *const Tensor, values_: *const Tensor, indices_: *const Tensor, k: i64, dim_: i64, keepdim: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_kthvalue_values(@ptrCast(&c_tensors), values_.c_tensor,
@@ -15808,7 +16044,7 @@ pub const Tensor = struct {
     }
 
     pub fn l1Loss(
-        self: *const Tensor, target: *Tensor, reduction: i64
+        self: *const Tensor, target: *const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_l1_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -15819,7 +16055,7 @@ pub const Tensor = struct {
     }
 
     pub fn layerNorm(
-        self: *const Tensor, normalized_shape: []i64, weight: ?*Tensor, bias: ?*Tensor, eps: f64, cudnn_enable: bool
+        self: *const Tensor, normalized_shape: []i64, weight: ?*const Tensor, bias: ?*const Tensor, eps: f64, cudnn_enable: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_layer_norm(@ptrCast(&c_tensors), self.c_tensor,
@@ -15833,7 +16069,7 @@ pub const Tensor = struct {
     }
 
     pub fn lcm(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lcm(@ptrCast(&c_tensors), self.c_tensor,
@@ -15843,7 +16079,7 @@ pub const Tensor = struct {
     }
 
     pub fn lcm_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lcm_(@ptrCast(&c_tensors), self.c_tensor,
@@ -15853,7 +16089,7 @@ pub const Tensor = struct {
     }
 
     pub fn lcmOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lcm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15864,7 +16100,7 @@ pub const Tensor = struct {
     }
 
     pub fn ldexp(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ldexp(@ptrCast(&c_tensors), self.c_tensor,
@@ -15874,7 +16110,7 @@ pub const Tensor = struct {
     }
 
     pub fn ldexp_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ldexp_(@ptrCast(&c_tensors), self.c_tensor,
@@ -15884,7 +16120,7 @@ pub const Tensor = struct {
     }
 
     pub fn ldexpOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ldexp_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15915,7 +16151,7 @@ pub const Tensor = struct {
     }
 
     pub fn leScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_le_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15926,7 +16162,7 @@ pub const Tensor = struct {
     }
 
     pub fn leTensor(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_le_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -15936,7 +16172,7 @@ pub const Tensor = struct {
     }
 
     pub fn leTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_le_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -15946,7 +16182,7 @@ pub const Tensor = struct {
     }
 
     pub fn leTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_le_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -15975,7 +16211,7 @@ pub const Tensor = struct {
     }
 
     pub fn leakyReluBackward(
-        self: *const Tensor, grad_output: *Tensor, negative_slope: Scalar, self_is_result: bool
+        self: *const Tensor, grad_output: *const Tensor, negative_slope: Scalar, self_is_result: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_leaky_relu_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -15987,7 +16223,7 @@ pub const Tensor = struct {
     }
 
     pub fn leakyReluBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, negative_slope: Scalar, self_is_result: bool
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, negative_slope: Scalar, self_is_result: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_leaky_relu_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -16000,7 +16236,7 @@ pub const Tensor = struct {
     }
 
     pub fn leakyReluOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_leaky_relu_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16010,7 +16246,7 @@ pub const Tensor = struct {
     }
 
     pub fn lerp(
-        self: *const Tensor, end: *Tensor, weight: Scalar
+        self: *const Tensor, end: *const Tensor, weight: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lerp(@ptrCast(&c_tensors), self.c_tensor,
@@ -16021,7 +16257,7 @@ pub const Tensor = struct {
     }
 
     pub fn lerp_(
-        self: *Tensor, end: *Tensor, weight: Scalar
+        self: *Tensor, end: *const Tensor, weight: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lerp_(@ptrCast(&c_tensors), self.c_tensor,
@@ -16032,7 +16268,7 @@ pub const Tensor = struct {
     }
 
     pub fn lerpScalarOut(
-        self: *const Tensor, out: *Tensor, end: *Tensor, weight: Scalar
+        self: *const Tensor, out: *const Tensor, end: *const Tensor, weight: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lerp_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16044,7 +16280,7 @@ pub const Tensor = struct {
     }
 
     pub fn lerpTensor(
-        self: *const Tensor, end: *Tensor, weight: *Tensor
+        self: *const Tensor, end: *const Tensor, weight: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lerp_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -16055,7 +16291,7 @@ pub const Tensor = struct {
     }
 
     pub fn lerpTensor_(
-        self: *Tensor, end: *Tensor, weight: *Tensor
+        self: *Tensor, end: *const Tensor, weight: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lerp_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -16066,7 +16302,7 @@ pub const Tensor = struct {
     }
 
     pub fn lerpTensorOut(
-        self: *const Tensor, out: *Tensor, end: *Tensor, weight: *Tensor
+        self: *const Tensor, out: *const Tensor, end: *const Tensor, weight: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lerp_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16118,7 +16354,7 @@ pub const Tensor = struct {
     }
 
     pub fn lessEqualScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_less_equal_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16129,7 +16365,7 @@ pub const Tensor = struct {
     }
 
     pub fn lessEqualTensor(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_less_equal_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -16139,7 +16375,7 @@ pub const Tensor = struct {
     }
 
     pub fn lessEqualTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_less_equal_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -16149,7 +16385,7 @@ pub const Tensor = struct {
     }
 
     pub fn lessEqualTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_less_equal_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16160,7 +16396,7 @@ pub const Tensor = struct {
     }
 
     pub fn lessScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_less_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16171,7 +16407,7 @@ pub const Tensor = struct {
     }
 
     pub fn lessTensor(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_less_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -16181,7 +16417,7 @@ pub const Tensor = struct {
     }
 
     pub fn lessTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_less_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -16191,7 +16427,7 @@ pub const Tensor = struct {
     }
 
     pub fn lessTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_less_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16220,7 +16456,7 @@ pub const Tensor = struct {
     }
 
     pub fn lgammaOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lgamma_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16257,7 +16493,7 @@ pub const Tensor = struct {
     }
 
     pub fn liftFreshCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lift_fresh_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16267,7 +16503,7 @@ pub const Tensor = struct {
     }
 
     pub fn liftOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lift_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16298,7 +16534,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgCholeskyExL(
-        self: *const Tensor, l: *Tensor, info: *Tensor, upper: bool, check_errors: bool
+        self: *const Tensor, l: *const Tensor, info: *const Tensor, upper: bool, check_errors: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_linalg_cholesky_ex_l(@ptrCast(&c_tensors), l.c_tensor,
@@ -16311,7 +16547,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgCholeskyOut(
-        self: *const Tensor, out: *Tensor, upper: bool
+        self: *const Tensor, out: *const Tensor, upper: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_cholesky_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16332,7 +16568,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgCondOut(
-        self: *const Tensor, out: *Tensor, p: Scalar
+        self: *const Tensor, out: *const Tensor, p: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_cond_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16343,7 +16579,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgCondPStr(
-        self: *const Tensor, p: []u8
+        self: *const Tensor, p: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_cond_p_str(@ptrCast(&c_tensors), self.c_tensor,
@@ -16353,7 +16589,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgCondPStrOut(
-        self: *const Tensor, out: *Tensor, p: []u8
+        self: *const Tensor, out: *const Tensor, p: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_cond_p_str_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16364,7 +16600,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgCross(
-        self: *const Tensor, other: *Tensor, dim_: i64
+        self: *const Tensor, other: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_cross(@ptrCast(&c_tensors), self.c_tensor,
@@ -16375,7 +16611,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgCrossOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor, dim_: i64
+        self: *const Tensor, out: *const Tensor, other: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_cross_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16387,7 +16623,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgDet(
-        a: *Tensor
+        a: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_det(@ptrCast(&c_tensors), a.c_tensor);
@@ -16396,7 +16632,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgDetOut(
-        out: *Tensor, a: *Tensor
+        out: *const Tensor, a: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_det_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16406,7 +16642,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgDiagonal(
-        a: *Tensor, offset: i64, dim1: i64, dim2: i64
+        a: *const Tensor, offset: i64, dim1: i64, dim2: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_diagonal(@ptrCast(&c_tensors), a.c_tensor,
@@ -16427,7 +16663,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgEigOut(
-        self: *const Tensor, eigenvalues: *Tensor, eigenvectors: *Tensor
+        self: *const Tensor, eigenvalues: *const Tensor, eigenvectors: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_linalg_eig_out(@ptrCast(&c_tensors), eigenvalues.c_tensor,
@@ -16438,7 +16674,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgEigh(
-        self: *const Tensor, uplo: []u8
+        self: *const Tensor, uplo: []const u8
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_linalg_eigh(@ptrCast(&c_tensors), self.c_tensor,
@@ -16448,7 +16684,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgEighEigvals(
-        self: *const Tensor, eigvals: *Tensor, eigvecs: *Tensor, uplo: []u8
+        self: *const Tensor, eigvals: *const Tensor, eigvecs: *const Tensor, uplo: []const u8
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_linalg_eigh_eigvals(@ptrCast(&c_tensors), eigvals.c_tensor,
@@ -16469,7 +16705,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgEigvalsOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_eigvals_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16479,7 +16715,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgEigvalsh(
-        self: *const Tensor, uplo: []u8
+        self: *const Tensor, uplo: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_eigvalsh(@ptrCast(&c_tensors), self.c_tensor,
@@ -16489,7 +16725,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgEigvalshOut(
-        self: *const Tensor, out: *Tensor, uplo: []u8
+        self: *const Tensor, out: *const Tensor, uplo: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_eigvalsh_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16500,7 +16736,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgHouseholderProduct(
-        self: *const Tensor, tau: *Tensor
+        self: *const Tensor, tau: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_householder_product(@ptrCast(&c_tensors), self.c_tensor,
@@ -16510,7 +16746,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgHouseholderProductOut(
-        self: *const Tensor, out: *Tensor, tau: *Tensor
+        self: *const Tensor, out: *const Tensor, tau: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_householder_product_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16521,7 +16757,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgInv(
-        a: *Tensor
+        a: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_inv(@ptrCast(&c_tensors), a.c_tensor);
@@ -16530,7 +16766,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgInvEx(
-        a: *Tensor, check_errors: bool
+        a: *const Tensor, check_errors: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_linalg_inv_ex(@ptrCast(&c_tensors), a.c_tensor,
@@ -16540,7 +16776,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgInvExInverse(
-        inverse_: *Tensor, info: *Tensor, a: *Tensor, check_errors: bool
+        inverse_: *const Tensor, info: *const Tensor, a: *const Tensor, check_errors: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_linalg_inv_ex_inverse(@ptrCast(&c_tensors), inverse_.c_tensor,
@@ -16552,7 +16788,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgInvOut(
-        out: *Tensor, a: *Tensor
+        out: *const Tensor, a: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_inv_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16583,7 +16819,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgLdlFactorExOut(
-        self: *const Tensor, ld: *Tensor, pivots: *Tensor, info: *Tensor, hermitian: bool, check_errors: bool
+        self: *const Tensor, ld: *const Tensor, pivots: *const Tensor, info: *const Tensor, hermitian: bool, check_errors: bool
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_linalg_ldl_factor_ex_out(@ptrCast(&c_tensors), ld.c_tensor,
@@ -16597,7 +16833,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgLdlFactorOut(
-        self: *const Tensor, ld: *Tensor, pivots: *Tensor, hermitian: bool
+        self: *const Tensor, ld: *const Tensor, pivots: *const Tensor, hermitian: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_linalg_ldl_factor_out(@ptrCast(&c_tensors), ld.c_tensor,
@@ -16609,7 +16845,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgLdlSolve(
-        ld: *Tensor, pivots: *Tensor, b: *Tensor, hermitian: bool
+        ld: *const Tensor, pivots: *const Tensor, b: *const Tensor, hermitian: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_ldl_solve(@ptrCast(&c_tensors), ld.c_tensor,
@@ -16621,7 +16857,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgLdlSolveOut(
-        out: *Tensor, ld: *Tensor, pivots: *Tensor, b: *Tensor, hermitian: bool
+        out: *const Tensor, ld: *const Tensor, pivots: *const Tensor, b: *const Tensor, hermitian: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_ldl_solve_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16634,7 +16870,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgLstsq(
-        self: *const Tensor, b: *Tensor, rcond: ?f64, driver: []u8
+        self: *const Tensor, b: *const Tensor, rcond: ?f64, driver: []const u8
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg_linalg_lstsq(@ptrCast(&c_tensors), self.c_tensor,
@@ -16646,7 +16882,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgLstsqOut(
-        self: *const Tensor, solution: *Tensor, residuals: *Tensor, rank: *Tensor, singular_values: *Tensor, b: *Tensor, rcond: ?f64, driver: []u8
+        self: *const Tensor, solution: *const Tensor, residuals: *const Tensor, rank: *const Tensor, singular_values: *const Tensor, b: *const Tensor, rcond: ?f64, driver: []const u8
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg_linalg_lstsq_out(@ptrCast(&c_tensors), solution.c_tensor,
@@ -16662,7 +16898,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgLu(
-        a: *Tensor, pivot: bool
+        a: *const Tensor, pivot: bool
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_linalg_lu(@ptrCast(&c_tensors), a.c_tensor,
@@ -16672,7 +16908,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgLuFactor(
-        a: *Tensor, pivot: bool
+        a: *const Tensor, pivot: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_linalg_lu_factor(@ptrCast(&c_tensors), a.c_tensor,
@@ -16682,7 +16918,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgLuFactorEx(
-        a: *Tensor, pivot: bool, check_errors: bool
+        a: *const Tensor, pivot: bool, check_errors: bool
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_linalg_lu_factor_ex(@ptrCast(&c_tensors), a.c_tensor,
@@ -16693,7 +16929,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgLuFactorExOut(
-        lu: *Tensor, pivots: *Tensor, info: *Tensor, a: *Tensor, pivot: bool, check_errors: bool
+        lu: *const Tensor, pivots: *const Tensor, info: *const Tensor, a: *const Tensor, pivot: bool, check_errors: bool
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_linalg_lu_factor_ex_out(@ptrCast(&c_tensors), lu.c_tensor,
@@ -16707,7 +16943,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgLuFactorOut(
-        lu: *Tensor, pivots: *Tensor, a: *Tensor, pivot: bool
+        lu: *const Tensor, pivots: *const Tensor, a: *const Tensor, pivot: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_linalg_lu_factor_out(@ptrCast(&c_tensors), lu.c_tensor,
@@ -16719,7 +16955,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgLuOut(
-        p: *Tensor, l: *Tensor, u: *Tensor, a: *Tensor, pivot: bool
+        p: *const Tensor, l: *const Tensor, u: *const Tensor, a: *const Tensor, pivot: bool
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_linalg_lu_out(@ptrCast(&c_tensors), p.c_tensor,
@@ -16732,7 +16968,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgLuSolve(
-        lu: *Tensor, pivots: *Tensor, b: *Tensor, left: bool, adjoint_: bool
+        lu: *const Tensor, pivots: *const Tensor, b: *const Tensor, left: bool, adjoint_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_lu_solve(@ptrCast(&c_tensors), lu.c_tensor,
@@ -16745,7 +16981,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgLuSolveOut(
-        out: *Tensor, lu: *Tensor, pivots: *Tensor, b: *Tensor, left: bool, adjoint_: bool
+        out: *const Tensor, lu: *const Tensor, pivots: *const Tensor, b: *const Tensor, left: bool, adjoint_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_lu_solve_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16759,7 +16995,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgMatmul(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_matmul(@ptrCast(&c_tensors), self.c_tensor,
@@ -16769,7 +17005,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgMatmulOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_matmul_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16789,7 +17025,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgMatrixExpOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_matrix_exp_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16809,7 +17045,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgMatrixPowerOut(
-        self: *const Tensor, out: *Tensor, n: i64
+        self: *const Tensor, out: *const Tensor, n: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_matrix_power_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16843,7 +17079,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgMatrixRankAtolRtolFloatOut(
-        self: *const Tensor, out: *Tensor, atol: ?f64, rtol: ?f64, hermitian: bool
+        self: *const Tensor, out: *const Tensor, atol: ?f64, rtol: ?f64, hermitian: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_matrix_rank_atol_rtol_float_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16856,7 +17092,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgMatrixRankAtolRtolTensor(
-        self: *const Tensor, atol: ?*Tensor, rtol: ?*Tensor, hermitian: bool
+        self: *const Tensor, atol: ?*const Tensor, rtol: ?*const Tensor, hermitian: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_matrix_rank_atol_rtol_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -16868,7 +17104,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgMatrixRankAtolRtolTensorOut(
-        self: *const Tensor, out: *Tensor, atol: ?*Tensor, rtol: ?*Tensor, hermitian: bool
+        self: *const Tensor, out: *const Tensor, atol: ?*const Tensor, rtol: ?*const Tensor, hermitian: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_matrix_rank_atol_rtol_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16881,7 +17117,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgMatrixRankOut(
-        self: *const Tensor, out: *Tensor, tol: f64, hermitian: bool
+        self: *const Tensor, out: *const Tensor, tol: f64, hermitian: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_matrix_rank_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16893,7 +17129,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgMatrixRankOutTolTensor(
-        self: *const Tensor, out: *Tensor, tol: *Tensor, hermitian: bool
+        self: *const Tensor, out: *const Tensor, tol: *const Tensor, hermitian: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_matrix_rank_out_tol_tensor(@ptrCast(&c_tensors), out.c_tensor,
@@ -16905,7 +17141,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgMatrixRankTolTensor(
-        self: *const Tensor, tol: *Tensor, hermitian: bool
+        self: *const Tensor, tol: *const Tensor, hermitian: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_matrix_rank_tol_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -16916,7 +17152,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgMultiDot(
-        tensors: []*Tensor
+        tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_multi_dot(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len));
@@ -16925,7 +17161,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgMultiDotOut(
-        out: *Tensor, tensors: []*Tensor
+        out: *const Tensor, tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_multi_dot_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16948,7 +17184,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgNormOrdStr(
-        self: *const Tensor, ord: []u8, dim_: ?[]i64, keepdim: bool, dtype: ?Kind
+        self: *const Tensor, ord: []const u8, dim_: ?[]i64, keepdim: bool, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_norm_ord_str(@ptrCast(&c_tensors), self.c_tensor,
@@ -16961,7 +17197,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgNormOrdStrOut(
-        self: *const Tensor, out: *Tensor, ord: []u8, dim_: ?[]i64, keepdim: bool, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, ord: []const u8, dim_: ?[]i64, keepdim: bool, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_norm_ord_str_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -16975,7 +17211,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgNormOut(
-        self: *const Tensor, out: *Tensor, ord: Scalar, dim_: ?[]i64, keepdim: bool, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, ord: Scalar, dim_: ?[]i64, keepdim: bool, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_norm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17012,7 +17248,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgPinvAtolRtolFloatOut(
-        self: *const Tensor, out: *Tensor, atol: ?f64, rtol: ?f64, hermitian: bool
+        self: *const Tensor, out: *const Tensor, atol: ?f64, rtol: ?f64, hermitian: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_pinv_atol_rtol_float_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17025,7 +17261,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgPinvAtolRtolTensor(
-        self: *const Tensor, atol: ?*Tensor, rtol: ?*Tensor, hermitian: bool
+        self: *const Tensor, atol: ?*const Tensor, rtol: ?*const Tensor, hermitian: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_pinv_atol_rtol_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -17037,7 +17273,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgPinvAtolRtolTensorOut(
-        self: *const Tensor, out: *Tensor, atol: ?*Tensor, rtol: ?*Tensor, hermitian: bool
+        self: *const Tensor, out: *const Tensor, atol: ?*const Tensor, rtol: ?*const Tensor, hermitian: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_pinv_atol_rtol_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17050,7 +17286,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgPinvOut(
-        self: *const Tensor, out: *Tensor, rcond: f64, hermitian: bool
+        self: *const Tensor, out: *const Tensor, rcond: f64, hermitian: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_pinv_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17062,7 +17298,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgPinvOutRcondTensor(
-        self: *const Tensor, out: *Tensor, rcond: *Tensor, hermitian: bool
+        self: *const Tensor, out: *const Tensor, rcond: *const Tensor, hermitian: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_pinv_out_rcond_tensor(@ptrCast(&c_tensors), out.c_tensor,
@@ -17074,7 +17310,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgPinvRcondTensor(
-        self: *const Tensor, rcond: *Tensor, hermitian: bool
+        self: *const Tensor, rcond: *const Tensor, hermitian: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_pinv_rcond_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -17085,7 +17321,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgQr(
-        a: *Tensor, mode_: []u8
+        a: *const Tensor, mode_: []const u8
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_linalg_qr(@ptrCast(&c_tensors), a.c_tensor,
@@ -17095,7 +17331,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgQrOut(
-        q: *Tensor, r: *Tensor, a: *Tensor, mode_: []u8
+        q: *const Tensor, r: *const Tensor, a: *const Tensor, mode_: []const u8
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_linalg_qr_out(@ptrCast(&c_tensors), q.c_tensor,
@@ -17107,7 +17343,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgSlogdet(
-        a: *Tensor
+        a: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_linalg_slogdet(@ptrCast(&c_tensors), a.c_tensor);
@@ -17116,7 +17352,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgSlogdetOut(
-        sign_: *Tensor, logabsdet: *Tensor, a: *Tensor
+        sign_: *const Tensor, logabsdet: *const Tensor, a: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_linalg_slogdet_out(@ptrCast(&c_tensors), sign_.c_tensor,
@@ -17127,7 +17363,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgSolve(
-        a: *Tensor, b: *Tensor, left: bool
+        a: *const Tensor, b: *const Tensor, left: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_solve(@ptrCast(&c_tensors), a.c_tensor,
@@ -17138,7 +17374,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgSolveEx(
-        a: *Tensor, b: *Tensor, left: bool, check_errors: bool
+        a: *const Tensor, b: *const Tensor, left: bool, check_errors: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_linalg_solve_ex(@ptrCast(&c_tensors), a.c_tensor,
@@ -17150,7 +17386,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgSolveExOut(
-        result: *Tensor, info: *Tensor, a: *Tensor, b: *Tensor, left: bool, check_errors: bool
+        result: *const Tensor, info: *const Tensor, a: *const Tensor, b: *const Tensor, left: bool, check_errors: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_linalg_solve_ex_out(@ptrCast(&c_tensors), result.c_tensor,
@@ -17164,7 +17400,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgSolveOut(
-        out: *Tensor, a: *Tensor, b: *Tensor, left: bool
+        out: *const Tensor, a: *const Tensor, b: *const Tensor, left: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_solve_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17176,7 +17412,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgSolveTriangular(
-        self: *const Tensor, b: *Tensor, upper: bool, left: bool, unitriangular: bool
+        self: *const Tensor, b: *const Tensor, upper: bool, left: bool, unitriangular: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_solve_triangular(@ptrCast(&c_tensors), self.c_tensor,
@@ -17189,7 +17425,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgSolveTriangularOut(
-        self: *const Tensor, out: *Tensor, b: *Tensor, upper: bool, left: bool, unitriangular: bool
+        self: *const Tensor, out: *const Tensor, b: *const Tensor, upper: bool, left: bool, unitriangular: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_solve_triangular_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17203,7 +17439,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgSvd(
-        a: *Tensor, full_matrices: bool, driver: []u8
+        a: *const Tensor, full_matrices: bool, driver: []const u8
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_linalg_svd(@ptrCast(&c_tensors), a.c_tensor,
@@ -17214,7 +17450,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgSvdU(
-        u: *Tensor, s: *Tensor, vh: *Tensor, a: *Tensor, full_matrices: bool, driver: []u8
+        u: *const Tensor, s: *const Tensor, vh: *const Tensor, a: *const Tensor, full_matrices: bool, driver: []const u8
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_linalg_svd_u(@ptrCast(&c_tensors), u.c_tensor,
@@ -17228,7 +17464,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgSvdvals(
-        a: *Tensor, driver: []u8
+        a: *const Tensor, driver: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_svdvals(@ptrCast(&c_tensors), a.c_tensor,
@@ -17238,7 +17474,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgSvdvalsOut(
-        out: *Tensor, a: *Tensor, driver: []u8
+        out: *const Tensor, a: *const Tensor, driver: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_svdvals_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17259,7 +17495,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgTensorinvOut(
-        self: *const Tensor, out: *Tensor, ind: i64
+        self: *const Tensor, out: *const Tensor, ind: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_tensorinv_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17270,7 +17506,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgTensorsolve(
-        self: *const Tensor, other: *Tensor, dims: ?[]i64
+        self: *const Tensor, other: *const Tensor, dims: ?[]i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_tensorsolve(@ptrCast(&c_tensors), self.c_tensor,
@@ -17281,7 +17517,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgTensorsolveOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor, dims: ?[]i64
+        self: *const Tensor, out: *const Tensor, other: *const Tensor, dims: ?[]i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_tensorsolve_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17293,7 +17529,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgVander(
-        x: *Tensor, n: ?i64
+        x: *const Tensor, n: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_vander(@ptrCast(&c_tensors), x.c_tensor,
@@ -17303,7 +17539,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgVecdot(
-        x: *Tensor, y: *Tensor, dim_: i64
+        x: *const Tensor, y: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_vecdot(@ptrCast(&c_tensors), x.c_tensor,
@@ -17314,7 +17550,7 @@ pub const Tensor = struct {
     }
 
     pub fn linalgVecdotOut(
-        out: *Tensor, x: *Tensor, y: *Tensor, dim_: i64
+        out: *const Tensor, x: *const Tensor, y: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_vecdot_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17326,7 +17562,7 @@ pub const Tensor = struct {
     }
 
     pub fn linear(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linear(@ptrCast(&c_tensors), self.c_tensor,
@@ -17337,7 +17573,7 @@ pub const Tensor = struct {
     }
 
     pub fn linearOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, bias: ?*Tensor
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linear_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17349,19 +17585,19 @@ pub const Tensor = struct {
     }
 
     pub fn linspace(
-        start: Scalar, end: Scalar, steps: i64, options: TensorOptions
+        start: Scalar, end: Scalar, steps: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linspace(@ptrCast(&c_tensors), start.into().c_scalar,
                 end.into().c_scalar,
                 steps,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn linspaceOut(
-        out: *Tensor, start: Scalar, end: Scalar, steps: i64
+        out: *const Tensor, start: Scalar, end: Scalar, steps: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linspace_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17373,19 +17609,19 @@ pub const Tensor = struct {
     }
 
     pub fn linspaceScalarTensor(
-        start: Scalar, end: *Tensor, steps: i64, options: TensorOptions
+        start: Scalar, end: *const Tensor, steps: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linspace_scalar_tensor(@ptrCast(&c_tensors), start.into().c_scalar,
                 end.c_tensor,
                 steps,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn linspaceScalarTensorOut(
-        out: *Tensor, start: Scalar, end: *Tensor, steps: i64
+        out: *const Tensor, start: Scalar, end: *const Tensor, steps: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linspace_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17397,19 +17633,19 @@ pub const Tensor = struct {
     }
 
     pub fn linspaceTensorScalar(
-        start: *Tensor, end: Scalar, steps: i64, options: TensorOptions
+        start: *const Tensor, end: Scalar, steps: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linspace_tensor_scalar(@ptrCast(&c_tensors), start.c_tensor,
                 end.into().c_scalar,
                 steps,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn linspaceTensorScalarOut(
-        out: *Tensor, start: *Tensor, end: Scalar, steps: i64
+        out: *const Tensor, start: *const Tensor, end: Scalar, steps: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linspace_tensor_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17421,19 +17657,19 @@ pub const Tensor = struct {
     }
 
     pub fn linspaceTensorTensor(
-        start: *Tensor, end: *Tensor, steps: i64, options: TensorOptions
+        start: *const Tensor, end: *const Tensor, steps: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linspace_tensor_tensor(@ptrCast(&c_tensors), start.c_tensor,
                 end.c_tensor,
                 steps,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn linspaceTensorTensorOut(
-        out: *Tensor, start: *Tensor, end: *Tensor, steps: i64
+        out: *const Tensor, start: *const Tensor, end: *const Tensor, steps: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linspace_tensor_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17472,7 +17708,7 @@ pub const Tensor = struct {
     }
 
     pub fn log10Out(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_log10_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17500,7 +17736,7 @@ pub const Tensor = struct {
     }
 
     pub fn log1pOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_log1p_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17528,7 +17764,7 @@ pub const Tensor = struct {
     }
 
     pub fn log2Out(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_log2_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17569,7 +17805,7 @@ pub const Tensor = struct {
     }
 
     pub fn logNormalOut(
-        self: *const Tensor, out: *Tensor, mean_: f64, std_dev: f64
+        self: *const Tensor, out: *const Tensor, mean_: f64, std_dev: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_log_normal_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17581,7 +17817,7 @@ pub const Tensor = struct {
     }
 
     pub fn logOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_log_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17600,7 +17836,7 @@ pub const Tensor = struct {
     }
 
     pub fn logSigmoidBackward(
-        self: *const Tensor, grad_output: *Tensor, buffer: *Tensor
+        self: *const Tensor, grad_output: *const Tensor, buffer: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_log_sigmoid_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -17611,7 +17847,7 @@ pub const Tensor = struct {
     }
 
     pub fn logSigmoidBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, buffer: *Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, buffer: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_log_sigmoid_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -17623,7 +17859,7 @@ pub const Tensor = struct {
     }
 
     pub fn logSigmoidOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_log_sigmoid_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17644,7 +17880,7 @@ pub const Tensor = struct {
     }
 
     pub fn logSoftmaxIntOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, dim_: i64, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_log_softmax_int_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17656,7 +17892,7 @@ pub const Tensor = struct {
     }
 
     pub fn logaddexp(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logaddexp(@ptrCast(&c_tensors), self.c_tensor,
@@ -17666,7 +17902,7 @@ pub const Tensor = struct {
     }
 
     pub fn logaddexp2(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logaddexp2(@ptrCast(&c_tensors), self.c_tensor,
@@ -17676,7 +17912,7 @@ pub const Tensor = struct {
     }
 
     pub fn logaddexp2Out(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logaddexp2_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17687,7 +17923,7 @@ pub const Tensor = struct {
     }
 
     pub fn logaddexpOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logaddexp_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17708,7 +17944,7 @@ pub const Tensor = struct {
     }
 
     pub fn logcumsumexpOut(
-        self: *const Tensor, out: *Tensor, dim_: i64
+        self: *const Tensor, out: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logcumsumexp_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17728,7 +17964,7 @@ pub const Tensor = struct {
     }
 
     pub fn logicalAnd(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logical_and(@ptrCast(&c_tensors), self.c_tensor,
@@ -17738,7 +17974,7 @@ pub const Tensor = struct {
     }
 
     pub fn logicalAnd_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logical_and_(@ptrCast(&c_tensors), self.c_tensor,
@@ -17748,7 +17984,7 @@ pub const Tensor = struct {
     }
 
     pub fn logicalAndOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logical_and_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17777,7 +18013,7 @@ pub const Tensor = struct {
     }
 
     pub fn logicalNotOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logical_not_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17787,7 +18023,7 @@ pub const Tensor = struct {
     }
 
     pub fn logicalOr(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logical_or(@ptrCast(&c_tensors), self.c_tensor,
@@ -17797,7 +18033,7 @@ pub const Tensor = struct {
     }
 
     pub fn logicalOr_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logical_or_(@ptrCast(&c_tensors), self.c_tensor,
@@ -17807,7 +18043,7 @@ pub const Tensor = struct {
     }
 
     pub fn logicalOrOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logical_or_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17818,7 +18054,7 @@ pub const Tensor = struct {
     }
 
     pub fn logicalXor(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logical_xor(@ptrCast(&c_tensors), self.c_tensor,
@@ -17828,7 +18064,7 @@ pub const Tensor = struct {
     }
 
     pub fn logicalXor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logical_xor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -17838,7 +18074,7 @@ pub const Tensor = struct {
     }
 
     pub fn logicalXorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logical_xor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17869,7 +18105,7 @@ pub const Tensor = struct {
     }
 
     pub fn logitBackward(
-        self: *const Tensor, grad_output: *Tensor, eps: ?f64
+        self: *const Tensor, grad_output: *const Tensor, eps: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logit_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -17880,7 +18116,7 @@ pub const Tensor = struct {
     }
 
     pub fn logitBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, eps: ?f64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, eps: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logit_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -17892,7 +18128,7 @@ pub const Tensor = struct {
     }
 
     pub fn logitOut(
-        self: *const Tensor, out: *Tensor, eps: ?f64
+        self: *const Tensor, out: *const Tensor, eps: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logit_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17903,20 +18139,20 @@ pub const Tensor = struct {
     }
 
     pub fn logspace(
-        start: Scalar, end: Scalar, steps: i64, base: f64, options: TensorOptions
+        start: Scalar, end: Scalar, steps: i64, base: f64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logspace(@ptrCast(&c_tensors), start.into().c_scalar,
                 end.into().c_scalar,
                 steps,
                 base,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn logspaceOut(
-        out: *Tensor, start: Scalar, end: Scalar, steps: i64, base: f64
+        out: *const Tensor, start: Scalar, end: Scalar, steps: i64, base: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logspace_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17929,20 +18165,20 @@ pub const Tensor = struct {
     }
 
     pub fn logspaceScalarTensor(
-        start: Scalar, end: *Tensor, steps: i64, base: f64, options: TensorOptions
+        start: Scalar, end: *const Tensor, steps: i64, base: f64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logspace_scalar_tensor(@ptrCast(&c_tensors), start.into().c_scalar,
                 end.c_tensor,
                 steps,
                 base,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn logspaceScalarTensorOut(
-        out: *Tensor, start: Scalar, end: *Tensor, steps: i64, base: f64
+        out: *const Tensor, start: Scalar, end: *const Tensor, steps: i64, base: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logspace_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17955,20 +18191,20 @@ pub const Tensor = struct {
     }
 
     pub fn logspaceTensorScalar(
-        start: *Tensor, end: Scalar, steps: i64, base: f64, options: TensorOptions
+        start: *const Tensor, end: Scalar, steps: i64, base: f64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logspace_tensor_scalar(@ptrCast(&c_tensors), start.c_tensor,
                 end.into().c_scalar,
                 steps,
                 base,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn logspaceTensorScalarOut(
-        out: *Tensor, start: *Tensor, end: Scalar, steps: i64, base: f64
+        out: *const Tensor, start: *const Tensor, end: Scalar, steps: i64, base: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logspace_tensor_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17981,20 +18217,20 @@ pub const Tensor = struct {
     }
 
     pub fn logspaceTensorTensor(
-        start: *Tensor, end: *Tensor, steps: i64, base: f64, options: TensorOptions
+        start: *const Tensor, end: *const Tensor, steps: i64, base: f64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logspace_tensor_tensor(@ptrCast(&c_tensors), start.c_tensor,
                 end.c_tensor,
                 steps,
                 base,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn logspaceTensorTensorOut(
-        out: *Tensor, start: *Tensor, end: *Tensor, steps: i64, base: f64
+        out: *const Tensor, start: *const Tensor, end: *const Tensor, steps: i64, base: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logspace_tensor_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18018,7 +18254,7 @@ pub const Tensor = struct {
     }
 
     pub fn logsumexpOut(
-        self: *const Tensor, out: *Tensor, dim_: []i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: []i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logsumexp_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18030,7 +18266,7 @@ pub const Tensor = struct {
     }
 
     pub fn lstm(
-        self: *const Tensor, hx: []*Tensor, params: []*Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool, batch_first: bool
+        self: *const Tensor, hx: []*const Tensor, params: []*const Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool, batch_first: bool
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_lstm(@ptrCast(&c_tensors), self.c_tensor,
@@ -18047,7 +18283,7 @@ pub const Tensor = struct {
     }
 
     pub fn lstmCell(
-        self: *const Tensor, hx: []*Tensor, w_ih: *Tensor, w_hh: *Tensor, b_ih: ?*Tensor, b_hh: ?*Tensor
+        self: *const Tensor, hx: []*const Tensor, w_ih: *const Tensor, w_hh: *const Tensor, b_ih: ?*const Tensor, b_hh: ?*const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_lstm_cell(@ptrCast(&c_tensors), self.c_tensor,
@@ -18061,7 +18297,7 @@ pub const Tensor = struct {
     }
 
     pub fn lstmData(
-        data_: *Tensor, batch_sizes: *Tensor, hx: []*Tensor, params: []*Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool
+        data_: *const Tensor, batch_sizes: *const Tensor, hx: []*const Tensor, params: []*const Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_lstm_data(@ptrCast(&c_tensors), data_.c_tensor,
@@ -18078,7 +18314,7 @@ pub const Tensor = struct {
     }
 
     pub fn lstmMpsBackward(
-        self: *const Tensor, out0: *Tensor, out1: []*Tensor, out2: []*Tensor, grad_y: ?*Tensor, grad_hy: ?*Tensor, grad_cy: ?*Tensor, z_state: *Tensor, cell_state_fwd: *Tensor, layersoutputs: *Tensor, hx: []*Tensor, params: []*Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool, batch_first: bool
+        self: *const Tensor, out0: *const Tensor, out1: []*const Tensor, out2: []*const Tensor, grad_y: ?*const Tensor, grad_hy: ?*const Tensor, grad_cy: ?*const Tensor, z_state: *const Tensor, cell_state_fwd: *const Tensor, layersoutputs: *const Tensor, hx: []*const Tensor, params: []*const Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool, batch_first: bool
     ) void {
         __c.atg_lstm_mps_backward(out0.c_tensor,
                 ptrList(out1).ptr, @intCast(out1.len),
@@ -18123,7 +18359,7 @@ pub const Tensor = struct {
     }
 
     pub fn ltScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lt_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18134,7 +18370,7 @@ pub const Tensor = struct {
     }
 
     pub fn ltTensor(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lt_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -18144,7 +18380,7 @@ pub const Tensor = struct {
     }
 
     pub fn ltTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lt_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -18154,7 +18390,7 @@ pub const Tensor = struct {
     }
 
     pub fn ltTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lt_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18165,7 +18401,7 @@ pub const Tensor = struct {
     }
 
     pub fn luSolve(
-        self: *const Tensor, lu_data: *Tensor, lu_pivots: *Tensor
+        self: *const Tensor, lu_data: *const Tensor, lu_pivots: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lu_solve(@ptrCast(&c_tensors), self.c_tensor,
@@ -18176,7 +18412,7 @@ pub const Tensor = struct {
     }
 
     pub fn luSolveOut(
-        self: *const Tensor, out: *Tensor, lu_data: *Tensor, lu_pivots: *Tensor
+        self: *const Tensor, out: *const Tensor, lu_data: *const Tensor, lu_pivots: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lu_solve_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18188,7 +18424,7 @@ pub const Tensor = struct {
     }
 
     pub fn luUnpack(
-        lu_data: *Tensor, lu_pivots: *Tensor, unpack_data: bool, unpack_pivots: bool
+        lu_data: *const Tensor, lu_pivots: *const Tensor, unpack_data: bool, unpack_pivots: bool
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_lu_unpack(@ptrCast(&c_tensors), lu_data.c_tensor,
@@ -18200,7 +18436,7 @@ pub const Tensor = struct {
     }
 
     pub fn luUnpackOut(
-        p: *Tensor, l: *Tensor, u: *Tensor, lu_data: *Tensor, lu_pivots: *Tensor, unpack_data: bool, unpack_pivots: bool
+        p: *const Tensor, l: *const Tensor, u: *const Tensor, lu_data: *const Tensor, lu_pivots: *const Tensor, unpack_data: bool, unpack_pivots: bool
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_lu_unpack_out(@ptrCast(&c_tensors), p.c_tensor,
@@ -18215,7 +18451,7 @@ pub const Tensor = struct {
     }
 
     pub fn marginRankingLoss(
-        input1: *Tensor, input2: *Tensor, target: *Tensor, margin: f64, reduction: i64
+        input1: *const Tensor, input2: *const Tensor, target: *const Tensor, margin: f64, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_margin_ranking_loss(@ptrCast(&c_tensors), input1.c_tensor,
@@ -18228,7 +18464,7 @@ pub const Tensor = struct {
     }
 
     pub fn maskedFill(
-        self: *const Tensor, mask: *Tensor, value: Scalar
+        self: *const Tensor, mask: *const Tensor, value: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_masked_fill(@ptrCast(&c_tensors), self.c_tensor,
@@ -18239,7 +18475,7 @@ pub const Tensor = struct {
     }
 
     pub fn maskedFill_(
-        self: *Tensor, mask: *Tensor, value: Scalar
+        self: *Tensor, mask: *const Tensor, value: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_masked_fill_(@ptrCast(&c_tensors), self.c_tensor,
@@ -18250,7 +18486,7 @@ pub const Tensor = struct {
     }
 
     pub fn maskedFillScalarOut(
-        self: *const Tensor, out: *Tensor, mask: *Tensor, value: Scalar
+        self: *const Tensor, out: *const Tensor, mask: *const Tensor, value: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_masked_fill_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18262,7 +18498,7 @@ pub const Tensor = struct {
     }
 
     pub fn maskedFillTensor(
-        self: *const Tensor, mask: *Tensor, value: *Tensor
+        self: *const Tensor, mask: *const Tensor, value: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_masked_fill_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -18273,7 +18509,7 @@ pub const Tensor = struct {
     }
 
     pub fn maskedFillTensor_(
-        self: *Tensor, mask: *Tensor, value: *Tensor
+        self: *Tensor, mask: *const Tensor, value: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_masked_fill_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -18284,7 +18520,7 @@ pub const Tensor = struct {
     }
 
     pub fn maskedFillTensorOut(
-        self: *const Tensor, out: *Tensor, mask: *Tensor, value: *Tensor
+        self: *const Tensor, out: *const Tensor, mask: *const Tensor, value: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_masked_fill_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18296,7 +18532,7 @@ pub const Tensor = struct {
     }
 
     pub fn maskedScatter(
-        self: *const Tensor, mask: *Tensor, source: *Tensor
+        self: *const Tensor, mask: *const Tensor, source: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_masked_scatter(@ptrCast(&c_tensors), self.c_tensor,
@@ -18307,7 +18543,7 @@ pub const Tensor = struct {
     }
 
     pub fn maskedScatter_(
-        self: *Tensor, mask: *Tensor, source: *Tensor
+        self: *Tensor, mask: *const Tensor, source: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_masked_scatter_(@ptrCast(&c_tensors), self.c_tensor,
@@ -18318,7 +18554,7 @@ pub const Tensor = struct {
     }
 
     pub fn maskedScatterBackward(
-        grad_output: *Tensor, mask: *Tensor, sizes: []i64
+        grad_output: *const Tensor, mask: *const Tensor, sizes: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_masked_scatter_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -18329,7 +18565,7 @@ pub const Tensor = struct {
     }
 
     pub fn maskedScatterOut(
-        self: *const Tensor, out: *Tensor, mask: *Tensor, source: *Tensor
+        self: *const Tensor, out: *const Tensor, mask: *const Tensor, source: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_masked_scatter_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18341,7 +18577,7 @@ pub const Tensor = struct {
     }
 
     pub fn maskedSelect(
-        self: *const Tensor, mask: *Tensor
+        self: *const Tensor, mask: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_masked_select(@ptrCast(&c_tensors), self.c_tensor,
@@ -18351,7 +18587,7 @@ pub const Tensor = struct {
     }
 
     pub fn maskedSelectBackward(
-        self: *const Tensor, gradient: *Tensor, mask: *Tensor
+        self: *const Tensor, gradient: *const Tensor, mask: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_masked_select_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -18362,7 +18598,7 @@ pub const Tensor = struct {
     }
 
     pub fn maskedSelectOut(
-        self: *const Tensor, out: *Tensor, mask: *Tensor
+        self: *const Tensor, out: *const Tensor, mask: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_masked_select_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18373,7 +18609,7 @@ pub const Tensor = struct {
     }
 
     pub fn matmul(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_matmul(@ptrCast(&c_tensors), self.c_tensor,
@@ -18383,7 +18619,7 @@ pub const Tensor = struct {
     }
 
     pub fn matmulOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_matmul_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18403,7 +18639,7 @@ pub const Tensor = struct {
     }
 
     pub fn matrixExpBackward(
-        self: *const Tensor, gradient: *Tensor
+        self: *const Tensor, gradient: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_matrix_exp_backward(@ptrCast(&c_tensors), self.c_tensor,
@@ -18432,7 +18668,7 @@ pub const Tensor = struct {
     }
 
     pub fn matrixPowerOut(
-        self: *const Tensor, out: *Tensor, n: i64
+        self: *const Tensor, out: *const Tensor, n: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_matrix_power_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18463,7 +18699,7 @@ pub const Tensor = struct {
     }
 
     pub fn maxDimMax(
-        self: *const Tensor, max_: *Tensor, max_values: *Tensor, dim_: i64, keepdim: bool
+        self: *const Tensor, max_: *const Tensor, max_values: *const Tensor, dim_: i64, keepdim: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_max_dim_max(@ptrCast(&c_tensors), max_.c_tensor,
@@ -18476,7 +18712,7 @@ pub const Tensor = struct {
     }
 
     pub fn maxOther(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_other(@ptrCast(&c_tensors), self.c_tensor,
@@ -18486,7 +18722,7 @@ pub const Tensor = struct {
     }
 
     pub fn maxOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18539,7 +18775,7 @@ pub const Tensor = struct {
     }
 
     pub fn maxPool2dBackward(
-        self: *const Tensor, grad_output: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_pool2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -18554,7 +18790,7 @@ pub const Tensor = struct {
     }
 
     pub fn maxPool2dBackwardOut(
-        self: *const Tensor, out: *Tensor, grad_output: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_pool2d_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18584,7 +18820,7 @@ pub const Tensor = struct {
     }
 
     pub fn maxPool2dWithIndicesBackward(
-        self: *const Tensor, grad_output: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool, indices_: *Tensor
+        self: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_pool2d_with_indices_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -18600,7 +18836,7 @@ pub const Tensor = struct {
     }
 
     pub fn maxPool2dWithIndicesBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool, indices_: *Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_pool2d_with_indices_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -18617,7 +18853,7 @@ pub const Tensor = struct {
     }
 
     pub fn maxPool2dWithIndicesOut(
-        self: *const Tensor, out: *Tensor, indices_: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_max_pool2d_with_indices_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18661,7 +18897,7 @@ pub const Tensor = struct {
     }
 
     pub fn maxPool3dWithIndicesBackward(
-        self: *const Tensor, grad_output: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool, indices_: *Tensor
+        self: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_pool3d_with_indices_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -18677,7 +18913,7 @@ pub const Tensor = struct {
     }
 
     pub fn maxPool3dWithIndicesBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool, indices_: *Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_pool3d_with_indices_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -18694,7 +18930,7 @@ pub const Tensor = struct {
     }
 
     pub fn maxPool3dWithIndicesOut(
-        self: *const Tensor, out: *Tensor, indices_: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_max_pool3d_with_indices_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18710,7 +18946,7 @@ pub const Tensor = struct {
     }
 
     pub fn maxUnaryOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_unary_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18720,7 +18956,7 @@ pub const Tensor = struct {
     }
 
     pub fn maxUnpool2d(
-        self: *const Tensor, indices_: *Tensor, output_size: []i64
+        self: *const Tensor, indices_: *const Tensor, output_size: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_unpool2d(@ptrCast(&c_tensors), self.c_tensor,
@@ -18731,7 +18967,7 @@ pub const Tensor = struct {
     }
 
     pub fn maxUnpool2dOut(
-        self: *const Tensor, out: *Tensor, indices_: *Tensor, output_size: []i64
+        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, output_size: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_unpool2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18743,7 +18979,7 @@ pub const Tensor = struct {
     }
 
     pub fn maxUnpool3d(
-        self: *const Tensor, indices_: *Tensor, output_size: []i64, stride_: []i64, padding: []i64
+        self: *const Tensor, indices_: *const Tensor, output_size: []i64, stride_: []i64, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_unpool3d(@ptrCast(&c_tensors), self.c_tensor,
@@ -18756,7 +18992,7 @@ pub const Tensor = struct {
     }
 
     pub fn maxUnpool3dOut(
-        self: *const Tensor, out: *Tensor, indices_: *Tensor, output_size: []i64, stride_: []i64, padding: []i64
+        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, output_size: []i64, stride_: []i64, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_unpool3d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18770,7 +19006,7 @@ pub const Tensor = struct {
     }
 
     pub fn maximum(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_maximum(@ptrCast(&c_tensors), self.c_tensor,
@@ -18780,7 +19016,7 @@ pub const Tensor = struct {
     }
 
     pub fn maximumOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_maximum_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18813,7 +19049,7 @@ pub const Tensor = struct {
     }
 
     pub fn meanOut(
-        self: *const Tensor, out: *Tensor, dim_: ?[]i64, keepdim: bool, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, dim_: ?[]i64, keepdim: bool, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mean_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18846,7 +19082,7 @@ pub const Tensor = struct {
     }
 
     pub fn medianDimValues(
-        self: *const Tensor, values_: *Tensor, indices_: *Tensor, dim_: i64, keepdim: bool
+        self: *const Tensor, values_: *const Tensor, indices_: *const Tensor, dim_: i64, keepdim: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_median_dim_values(@ptrCast(&c_tensors), values_.c_tensor,
@@ -18859,7 +19095,7 @@ pub const Tensor = struct {
     }
 
     pub fn medianOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_median_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18869,32 +19105,32 @@ pub const Tensor = struct {
     }
 
     pub fn meshgrid(
-        tensors: []*Tensor
+        tensors: []*const Tensor
     ) []Tensor {
         const c_tensors = __c.atg_meshgrid(ptrList(tensors).ptr, @intCast(tensors.len));
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
 
     pub fn meshgridIndexing(
-        tensors: []*Tensor, indexing: []u8
+        tensors: []*const Tensor, indexing: []const u8
     ) []Tensor {
         const c_tensors = __c.atg_meshgrid_indexing(ptrList(tensors).ptr, @intCast(tensors.len),
                 indexing.ptr, indexing.len);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
@@ -18929,7 +19165,7 @@ pub const Tensor = struct {
     }
 
     pub fn minDimMin(
-        self: *const Tensor, min_: *Tensor, min_indices: *Tensor, dim_: i64, keepdim: bool
+        self: *const Tensor, min_: *const Tensor, min_indices: *const Tensor, dim_: i64, keepdim: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_min_dim_min(@ptrCast(&c_tensors), min_.c_tensor,
@@ -18942,7 +19178,7 @@ pub const Tensor = struct {
     }
 
     pub fn minOther(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_min_other(@ptrCast(&c_tensors), self.c_tensor,
@@ -18952,7 +19188,7 @@ pub const Tensor = struct {
     }
 
     pub fn minOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_min_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18963,7 +19199,7 @@ pub const Tensor = struct {
     }
 
     pub fn minUnaryOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_min_unary_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18973,7 +19209,7 @@ pub const Tensor = struct {
     }
 
     pub fn minimum(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_minimum(@ptrCast(&c_tensors), self.c_tensor,
@@ -18983,7 +19219,7 @@ pub const Tensor = struct {
     }
 
     pub fn minimumOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_minimum_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -18994,7 +19230,7 @@ pub const Tensor = struct {
     }
 
     pub fn miopenBatchNorm(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, running_mean: ?*Tensor, running_var: ?*Tensor, training: bool, exponential_average_factor: f64, epsilon: f64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, running_mean: ?*const Tensor, running_var: ?*const Tensor, training: bool, exponential_average_factor: f64, epsilon: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_miopen_batch_norm(@ptrCast(&c_tensors), self.c_tensor,
@@ -19010,7 +19246,7 @@ pub const Tensor = struct {
     }
 
     pub fn miopenBatchNormBackward(
-        self: *const Tensor, grad_output: *Tensor, weight: *Tensor, running_mean: ?*Tensor, running_var: ?*Tensor, save_mean: ?*Tensor, save_var: ?*Tensor, epsilon: f64
+        self: *const Tensor, grad_output: *const Tensor, weight: *const Tensor, running_mean: ?*const Tensor, running_var: ?*const Tensor, save_mean: ?*const Tensor, save_var: ?*const Tensor, epsilon: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_miopen_batch_norm_backward(@ptrCast(&c_tensors), self.c_tensor,
@@ -19026,7 +19262,7 @@ pub const Tensor = struct {
     }
 
     pub fn miopenBatchNormBackwardOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, out2: *Tensor, grad_output: *Tensor, weight: *Tensor, running_mean: ?*Tensor, running_var: ?*Tensor, save_mean: ?*Tensor, save_var: ?*Tensor, epsilon: f64
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, grad_output: *const Tensor, weight: *const Tensor, running_mean: ?*const Tensor, running_var: ?*const Tensor, save_mean: ?*const Tensor, save_var: ?*const Tensor, epsilon: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_miopen_batch_norm_backward_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -19045,7 +19281,7 @@ pub const Tensor = struct {
     }
 
     pub fn miopenBatchNormOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, out2: *Tensor, weight: *Tensor, bias: ?*Tensor, running_mean: ?*Tensor, running_var: ?*Tensor, training: bool, exponential_average_factor: f64, epsilon: f64
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, running_mean: ?*const Tensor, running_var: ?*const Tensor, training: bool, exponential_average_factor: f64, epsilon: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_miopen_batch_norm_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -19064,7 +19300,7 @@ pub const Tensor = struct {
     }
 
     pub fn miopenConvolution(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_miopen_convolution(@ptrCast(&c_tensors), self.c_tensor,
@@ -19081,7 +19317,7 @@ pub const Tensor = struct {
     }
 
     pub fn miopenConvolutionAddRelu(
-        self: *const Tensor, weight: *Tensor, z: *Tensor, alpha: Scalar, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, z: *const Tensor, alpha: Scalar, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_miopen_convolution_add_relu(@ptrCast(&c_tensors), self.c_tensor,
@@ -19098,7 +19334,7 @@ pub const Tensor = struct {
     }
 
     pub fn miopenConvolutionOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, bias: ?*Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_miopen_convolution_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19116,7 +19352,7 @@ pub const Tensor = struct {
     }
 
     pub fn miopenConvolutionRelu(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_miopen_convolution_relu(@ptrCast(&c_tensors), self.c_tensor,
@@ -19131,7 +19367,7 @@ pub const Tensor = struct {
     }
 
     pub fn miopenConvolutionTranspose(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, padding: []i64, output_padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, output_padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_miopen_convolution_transpose(@ptrCast(&c_tensors), self.c_tensor,
@@ -19149,7 +19385,7 @@ pub const Tensor = struct {
     }
 
     pub fn miopenConvolutionTransposeOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, bias: ?*Tensor, padding: []i64, output_padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, output_padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_miopen_convolution_transpose_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19168,7 +19404,7 @@ pub const Tensor = struct {
     }
 
     pub fn miopenDepthwiseConvolution(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_miopen_depthwise_convolution(@ptrCast(&c_tensors), self.c_tensor,
@@ -19185,7 +19421,7 @@ pub const Tensor = struct {
     }
 
     pub fn miopenDepthwiseConvolutionOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, bias: ?*Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_miopen_depthwise_convolution_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19203,7 +19439,7 @@ pub const Tensor = struct {
     }
 
     pub fn miopenRnn(
-        self: *const Tensor, weight: []*Tensor, weight_stride0: i64, hx: *Tensor, cx: ?*Tensor, mode_: i64, hidden_size: i64, num_layers: i64, batch_first: bool, dropout_: f64, train: bool, bidirectional: bool, batch_sizes: []i64, dropout_state: ?*Tensor
+        self: *const Tensor, weight: []*const Tensor, weight_stride0: i64, hx: *const Tensor, cx: ?*const Tensor, mode_: i64, hidden_size: i64, num_layers: i64, batch_first: bool, dropout_: f64, train: bool, bidirectional: bool, batch_sizes: []i64, dropout_state: ?*const Tensor
     ) [5]Tensor {
         var c_tensors = [_]C_tensor{null} ** 5;
         __c.atg_miopen_rnn(@ptrCast(&c_tensors), self.c_tensor,
@@ -19225,7 +19461,7 @@ pub const Tensor = struct {
     }
 
     pub fn miopenRnnOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, out2: *Tensor, out3: *Tensor, out4: *Tensor, weight: []*Tensor, weight_stride0: i64, hx: *Tensor, cx: ?*Tensor, mode_: i64, hidden_size: i64, num_layers: i64, batch_first: bool, dropout_: f64, train: bool, bidirectional: bool, batch_sizes: []i64, dropout_state: ?*Tensor
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, out3: *const Tensor, out4: *const Tensor, weight: []*const Tensor, weight_stride0: i64, hx: *const Tensor, cx: ?*const Tensor, mode_: i64, hidden_size: i64, num_layers: i64, batch_first: bool, dropout_: f64, train: bool, bidirectional: bool, batch_sizes: []i64, dropout_state: ?*const Tensor
     ) [5]Tensor {
         var c_tensors = [_]C_tensor{null} ** 5;
         __c.atg_miopen_rnn_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -19270,7 +19506,7 @@ pub const Tensor = struct {
     }
 
     pub fn mishBackward(
-        self: *const Tensor, grad_output: *Tensor
+        self: *const Tensor, grad_output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mish_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -19280,7 +19516,7 @@ pub const Tensor = struct {
     }
 
     pub fn mishOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mish_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19300,7 +19536,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnAdaptiveAvgPool2dBackward(
-        self: *const Tensor, grad_output: *Tensor
+        self: *const Tensor, grad_output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_adaptive_avg_pool2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -19310,7 +19546,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnAdaptiveAvgPool2dBackwardOut(
-        self: *const Tensor, out: *Tensor, grad_output: *Tensor
+        self: *const Tensor, out: *const Tensor, grad_output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_adaptive_avg_pool2d_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19321,7 +19557,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnAdaptiveAvgPool2dOut(
-        self: *const Tensor, out: *Tensor, output_size: []i64
+        self: *const Tensor, out: *const Tensor, output_size: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_adaptive_avg_pool2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19332,7 +19568,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnConvolution(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_convolution(@ptrCast(&c_tensors), self.c_tensor,
@@ -19347,7 +19583,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnConvolutionOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, bias: ?*Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_convolution_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19363,7 +19599,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnLinear(
-        self: *const Tensor, weight: *Tensor, bias: ?*Tensor
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_linear(@ptrCast(&c_tensors), self.c_tensor,
@@ -19374,7 +19610,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnLinearBackwardInput(
-        input_size: []i64, grad_output: *Tensor, weight: *Tensor
+        input_size: []i64, grad_output: *const Tensor, weight: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_linear_backward_input(@ptrCast(&c_tensors), input_size.ptr, @intCast(input_size.len),
@@ -19385,7 +19621,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnLinearBackwardInputOut(
-        out: *Tensor, input_size: []i64, grad_output: *Tensor, weight: *Tensor
+        out: *const Tensor, input_size: []i64, grad_output: *const Tensor, weight: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_linear_backward_input_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19397,7 +19633,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnLinearBackwardWeights(
-        self: *const Tensor, grad_output: *Tensor, weight: *Tensor, bias_defined: bool
+        self: *const Tensor, grad_output: *const Tensor, weight: *const Tensor, bias_defined: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_mkldnn_linear_backward_weights(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -19409,7 +19645,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnLinearBackwardWeightsOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, grad_output: *Tensor, weight: *Tensor, bias_defined: bool
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, grad_output: *const Tensor, weight: *const Tensor, bias_defined: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_mkldnn_linear_backward_weights_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -19423,7 +19659,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnLinearOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, bias: ?*Tensor
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_linear_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19449,7 +19685,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnMaxPool2dBackward(
-        self: *const Tensor, grad_output: *Tensor, output: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, grad_output: *const Tensor, output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_max_pool2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -19465,7 +19701,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnMaxPool2dBackwardOut(
-        self: *const Tensor, out: *Tensor, grad_output: *Tensor, output: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, grad_output: *const Tensor, output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_max_pool2d_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19482,7 +19718,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnMaxPool2dOut(
-        self: *const Tensor, out: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_max_pool2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19511,7 +19747,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnMaxPool3dBackward(
-        self: *const Tensor, grad_output: *Tensor, output: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, grad_output: *const Tensor, output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_max_pool3d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -19527,7 +19763,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnMaxPool3dBackwardOut(
-        self: *const Tensor, out: *Tensor, grad_output: *Tensor, output: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, grad_output: *const Tensor, output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_max_pool3d_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19544,7 +19780,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnMaxPool3dOut(
-        self: *const Tensor, out: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_max_pool3d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19573,7 +19809,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnReorderConv2dWeightOut(
-        self: *const Tensor, out: *Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, input_size: ?[]i64
+        self: *const Tensor, out: *const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, input_size: ?[]i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_reorder_conv2d_weight_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19601,7 +19837,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnReorderConv3dWeightOut(
-        self: *const Tensor, out: *Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, out: *const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_reorder_conv3d_weight_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19615,7 +19851,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnRnnLayer(
-        self: *const Tensor, weight0: *Tensor, weight1: *Tensor, weight2: *Tensor, weight3: *Tensor, hx_: *Tensor, cx_: *Tensor, reverse: bool, batch_sizes: []i64, mode_: i64, hidden_size: i64, num_layers: i64, has_biases: bool, bidirectional: bool, batch_first: bool, train: bool
+        self: *const Tensor, weight0: *const Tensor, weight1: *const Tensor, weight2: *const Tensor, weight3: *const Tensor, hx_: *const Tensor, cx_: *const Tensor, reverse: bool, batch_sizes: []i64, mode_: i64, hidden_size: i64, num_layers: i64, has_biases: bool, bidirectional: bool, batch_first: bool, train: bool
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg_mkldnn_rnn_layer(@ptrCast(&c_tensors), self.c_tensor,
@@ -19639,7 +19875,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnRnnLayerBackward(
-        self: *const Tensor, weight1: *Tensor, weight2: *Tensor, weight3: *Tensor, weight4: *Tensor, hx_: *Tensor, cx_tmp: *Tensor, output: *Tensor, hy_: *Tensor, cy_: *Tensor, grad_output: ?*Tensor, grad_hy: ?*Tensor, grad_cy: ?*Tensor, reverse: bool, mode_: i64, hidden_size: i64, num_layers: i64, has_biases: bool, train: bool, bidirectional: bool, batch_sizes: []i64, batch_first: bool, workspace: *Tensor
+        self: *const Tensor, weight1: *const Tensor, weight2: *const Tensor, weight3: *const Tensor, weight4: *const Tensor, hx_: *const Tensor, cx_tmp: *const Tensor, output: *const Tensor, hy_: *const Tensor, cy_: *const Tensor, grad_output: ?*const Tensor, grad_hy: ?*const Tensor, grad_cy: ?*const Tensor, reverse: bool, mode_: i64, hidden_size: i64, num_layers: i64, has_biases: bool, train: bool, bidirectional: bool, batch_sizes: []i64, batch_first: bool, workspace: *const Tensor
     ) [7]Tensor {
         var c_tensors = [_]C_tensor{null} ** 7;
         __c.atg_mkldnn_rnn_layer_backward(@ptrCast(&c_tensors), self.c_tensor,
@@ -19670,7 +19906,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnRnnLayerBackwardOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, out2: *Tensor, out3: *Tensor, out4: *Tensor, out5: *Tensor, out6: *Tensor, weight1: *Tensor, weight2: *Tensor, weight3: *Tensor, weight4: *Tensor, hx_: *Tensor, cx_tmp: *Tensor, output: *Tensor, hy_: *Tensor, cy_: *Tensor, grad_output: ?*Tensor, grad_hy: ?*Tensor, grad_cy: ?*Tensor, reverse: bool, mode_: i64, hidden_size: i64, num_layers: i64, has_biases: bool, train: bool, bidirectional: bool, batch_sizes: []i64, batch_first: bool, workspace: *Tensor
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, out3: *const Tensor, out4: *const Tensor, out5: *const Tensor, out6: *const Tensor, weight1: *const Tensor, weight2: *const Tensor, weight3: *const Tensor, weight4: *const Tensor, hx_: *const Tensor, cx_tmp: *const Tensor, output: *const Tensor, hy_: *const Tensor, cy_: *const Tensor, grad_output: ?*const Tensor, grad_hy: ?*const Tensor, grad_cy: ?*const Tensor, reverse: bool, mode_: i64, hidden_size: i64, num_layers: i64, has_biases: bool, train: bool, bidirectional: bool, batch_sizes: []i64, batch_first: bool, workspace: *const Tensor
     ) [7]Tensor {
         var c_tensors = [_]C_tensor{null} ** 7;
         __c.atg_mkldnn_rnn_layer_backward_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -19708,7 +19944,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnRnnLayerOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, out2: *Tensor, out3: *Tensor, weight0: *Tensor, weight1: *Tensor, weight2: *Tensor, weight3: *Tensor, hx_: *Tensor, cx_: *Tensor, reverse: bool, batch_sizes: []i64, mode_: i64, hidden_size: i64, num_layers: i64, has_biases: bool, bidirectional: bool, batch_first: bool, train: bool
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, out3: *const Tensor, weight0: *const Tensor, weight1: *const Tensor, weight2: *const Tensor, weight3: *const Tensor, hx_: *const Tensor, cx_: *const Tensor, reverse: bool, batch_sizes: []i64, mode_: i64, hidden_size: i64, num_layers: i64, has_biases: bool, bidirectional: bool, batch_first: bool, train: bool
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg_mkldnn_rnn_layer_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -19736,7 +19972,7 @@ pub const Tensor = struct {
     }
 
     pub fn mm(
-        self: *const Tensor, mat2: *Tensor
+        self: *const Tensor, mat2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mm(@ptrCast(&c_tensors), self.c_tensor,
@@ -19746,7 +19982,7 @@ pub const Tensor = struct {
     }
 
     pub fn mmOut(
-        self: *const Tensor, out: *Tensor, mat2: *Tensor
+        self: *const Tensor, out: *const Tensor, mat2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19768,7 +20004,7 @@ pub const Tensor = struct {
     }
 
     pub fn modeValues(
-        self: *const Tensor, values_: *Tensor, indices_: *Tensor, dim_: i64, keepdim: bool
+        self: *const Tensor, values_: *const Tensor, indices_: *const Tensor, dim_: i64, keepdim: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_mode_values(@ptrCast(&c_tensors), values_.c_tensor,
@@ -19825,7 +20061,7 @@ pub const Tensor = struct {
     }
 
     pub fn mseLoss(
-        self: *const Tensor, target: *Tensor, reduction: i64
+        self: *const Tensor, target: *const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mse_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -19836,7 +20072,7 @@ pub const Tensor = struct {
     }
 
     pub fn mseLossBackward(
-        self: *const Tensor, grad_output: *Tensor, target: *Tensor, reduction: i64
+        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mse_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -19848,7 +20084,7 @@ pub const Tensor = struct {
     }
 
     pub fn mseLossBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, target: *Tensor, reduction: i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mse_loss_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -19861,7 +20097,7 @@ pub const Tensor = struct {
     }
 
     pub fn mseLossOut(
-        self: *const Tensor, out: *Tensor, target: *Tensor, reduction: i64
+        self: *const Tensor, out: *const Tensor, target: *const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mse_loss_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19882,7 +20118,7 @@ pub const Tensor = struct {
     }
 
     pub fn msortOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_msort_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19901,7 +20137,7 @@ pub const Tensor = struct {
     }
 
     pub fn mul(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mul(@ptrCast(&c_tensors), self.c_tensor,
@@ -19911,7 +20147,7 @@ pub const Tensor = struct {
     }
 
     pub fn mul_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mul_(@ptrCast(&c_tensors), self.c_tensor,
@@ -19921,7 +20157,7 @@ pub const Tensor = struct {
     }
 
     pub fn mulOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mul_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19952,7 +20188,7 @@ pub const Tensor = struct {
     }
 
     pub fn mulScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mul_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -19963,7 +20199,7 @@ pub const Tensor = struct {
     }
 
     pub fn multiMarginLossBackward(
-        self: *const Tensor, grad_output: *Tensor, target: *Tensor, p: Scalar, margin: Scalar, weight: ?*Tensor, reduction: i64
+        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, p: Scalar, margin: Scalar, weight: ?*const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multi_margin_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -19978,7 +20214,7 @@ pub const Tensor = struct {
     }
 
     pub fn multiMarginLossBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, target: *Tensor, p: Scalar, margin: Scalar, weight: ?*Tensor, reduction: i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, p: Scalar, margin: Scalar, weight: ?*const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multi_margin_loss_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -19994,7 +20230,7 @@ pub const Tensor = struct {
     }
 
     pub fn multilabelMarginLoss(
-        self: *const Tensor, target: *Tensor, reduction: i64
+        self: *const Tensor, target: *const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multilabel_margin_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -20005,7 +20241,7 @@ pub const Tensor = struct {
     }
 
     pub fn multilabelMarginLossBackward(
-        self: *const Tensor, grad_output: *Tensor, target: *Tensor, reduction: i64, is_target: *Tensor
+        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64, is_target: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multilabel_margin_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -20018,7 +20254,7 @@ pub const Tensor = struct {
     }
 
     pub fn multilabelMarginLossBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, target: *Tensor, reduction: i64, is_target: *Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64, is_target: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multilabel_margin_loss_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -20032,7 +20268,7 @@ pub const Tensor = struct {
     }
 
     pub fn multilabelMarginLossOut(
-        self: *const Tensor, out: *Tensor, target: *Tensor, reduction: i64
+        self: *const Tensor, out: *const Tensor, target: *const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multilabel_margin_loss_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20055,7 +20291,7 @@ pub const Tensor = struct {
     }
 
     pub fn multinomialOut(
-        self: *const Tensor, out: *Tensor, num_samples: i64, replacement: bool
+        self: *const Tensor, out: *const Tensor, num_samples: i64, replacement: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multinomial_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20067,7 +20303,7 @@ pub const Tensor = struct {
     }
 
     pub fn multiply(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multiply(@ptrCast(&c_tensors), self.c_tensor,
@@ -20077,7 +20313,7 @@ pub const Tensor = struct {
     }
 
     pub fn multiply_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multiply_(@ptrCast(&c_tensors), self.c_tensor,
@@ -20087,7 +20323,7 @@ pub const Tensor = struct {
     }
 
     pub fn multiplyOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multiply_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20118,7 +20354,7 @@ pub const Tensor = struct {
     }
 
     pub fn mv(
-        self: *const Tensor, vec: *Tensor
+        self: *const Tensor, vec: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mv(@ptrCast(&c_tensors), self.c_tensor,
@@ -20128,7 +20364,7 @@ pub const Tensor = struct {
     }
 
     pub fn mvOut(
-        self: *const Tensor, out: *Tensor, vec: *Tensor
+        self: *const Tensor, out: *const Tensor, vec: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mv_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20159,7 +20395,7 @@ pub const Tensor = struct {
     }
 
     pub fn mvlgammaOut(
-        self: *const Tensor, out: *Tensor, p: i64
+        self: *const Tensor, out: *const Tensor, p: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mvlgamma_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20194,7 +20430,7 @@ pub const Tensor = struct {
     }
 
     pub fn nanToNumOut(
-        self: *const Tensor, out: *Tensor, nan: ?f64, posinf: ?f64, neginf: ?f64
+        self: *const Tensor, out: *const Tensor, nan: ?f64, posinf: ?f64, neginf: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nan_to_num_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20219,7 +20455,7 @@ pub const Tensor = struct {
     }
 
     pub fn nanmeanOut(
-        self: *const Tensor, out: *Tensor, dim_: ?[]i64, keepdim: bool, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, dim_: ?[]i64, keepdim: bool, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nanmean_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20252,7 +20488,7 @@ pub const Tensor = struct {
     }
 
     pub fn nanmedianDimValues(
-        self: *const Tensor, values_: *Tensor, indices_: *Tensor, dim_: i64, keepdim: bool
+        self: *const Tensor, values_: *const Tensor, indices_: *const Tensor, dim_: i64, keepdim: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_nanmedian_dim_values(@ptrCast(&c_tensors), values_.c_tensor,
@@ -20265,7 +20501,7 @@ pub const Tensor = struct {
     }
 
     pub fn nanmedianOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nanmedian_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20275,7 +20511,7 @@ pub const Tensor = struct {
     }
 
     pub fn nanquantile(
-        self: *const Tensor, q: *Tensor, dim_: ?i64, keepdim: bool, interpolation: []u8
+        self: *const Tensor, q: *const Tensor, dim_: ?i64, keepdim: bool, interpolation: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nanquantile(@ptrCast(&c_tensors), self.c_tensor,
@@ -20288,7 +20524,7 @@ pub const Tensor = struct {
     }
 
     pub fn nanquantileOut(
-        self: *const Tensor, out: *Tensor, q: *Tensor, dim_: ?i64, keepdim: bool, interpolation: []u8
+        self: *const Tensor, out: *const Tensor, q: *const Tensor, dim_: ?i64, keepdim: bool, interpolation: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nanquantile_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20302,7 +20538,7 @@ pub const Tensor = struct {
     }
 
     pub fn nanquantileScalar(
-        self: *const Tensor, q: f64, dim_: ?i64, keepdim: bool, interpolation: []u8
+        self: *const Tensor, q: f64, dim_: ?i64, keepdim: bool, interpolation: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nanquantile_scalar(@ptrCast(&c_tensors), self.c_tensor,
@@ -20315,7 +20551,7 @@ pub const Tensor = struct {
     }
 
     pub fn nanquantileScalarOut(
-        self: *const Tensor, out: *Tensor, q: f64, dim_: ?i64, keepdim: bool, interpolation: []u8
+        self: *const Tensor, out: *const Tensor, q: f64, dim_: ?i64, keepdim: bool, interpolation: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nanquantile_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20341,7 +20577,7 @@ pub const Tensor = struct {
     }
 
     pub fn nansumOut(
-        self: *const Tensor, out: *Tensor, dim_: ?[]i64, keepdim: bool, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, dim_: ?[]i64, keepdim: bool, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nansum_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20378,7 +20614,7 @@ pub const Tensor = struct {
     }
 
     pub fn narrowCopyOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, start: i64, length: i64
+        self: *const Tensor, out: *const Tensor, dim_: i64, start: i64, length: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_narrow_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20391,7 +20627,7 @@ pub const Tensor = struct {
     }
 
     pub fn narrowTensor(
-        self: *const Tensor, dim_: i64, start: *Tensor, length: i64
+        self: *const Tensor, dim_: i64, start: *const Tensor, length: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_narrow_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -20403,7 +20639,7 @@ pub const Tensor = struct {
     }
 
     pub fn nativeBatchNorm(
-        self: *const Tensor, weight: ?*Tensor, bias: ?*Tensor, running_mean: ?*Tensor, running_var: ?*Tensor, training: bool, momentum: f64, eps: f64
+        self: *const Tensor, weight: ?*const Tensor, bias: ?*const Tensor, running_mean: ?*const Tensor, running_var: ?*const Tensor, training: bool, momentum: f64, eps: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_native_batch_norm(@ptrCast(&c_tensors), self.c_tensor,
@@ -20419,7 +20655,7 @@ pub const Tensor = struct {
     }
 
     pub fn nativeBatchNormOut(
-        self: *const Tensor, out: *Tensor, save_mean: *Tensor, save_invstd: *Tensor, weight: ?*Tensor, bias: ?*Tensor, running_mean: ?*Tensor, running_var: ?*Tensor, training: bool, momentum: f64, eps: f64
+        self: *const Tensor, out: *const Tensor, save_mean: *const Tensor, save_invstd: *const Tensor, weight: ?*const Tensor, bias: ?*const Tensor, running_mean: ?*const Tensor, running_var: ?*const Tensor, training: bool, momentum: f64, eps: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_native_batch_norm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20459,7 +20695,7 @@ pub const Tensor = struct {
     }
 
     pub fn nativeDropoutBackward(
-        grad_output: *Tensor, mask: *Tensor, scale: f64
+        grad_output: *const Tensor, mask: *const Tensor, scale: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_native_dropout_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -20470,7 +20706,7 @@ pub const Tensor = struct {
     }
 
     pub fn nativeDropoutBackwardOut(
-        out: *Tensor, grad_output: *Tensor, mask: *Tensor, scale: f64
+        out: *const Tensor, grad_output: *const Tensor, mask: *const Tensor, scale: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_native_dropout_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20482,7 +20718,7 @@ pub const Tensor = struct {
     }
 
     pub fn nativeDropoutOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, p: f64, train: bool
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, p: f64, train: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_native_dropout_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -20495,7 +20731,7 @@ pub const Tensor = struct {
     }
 
     pub fn nativeGroupNorm(
-        self: *const Tensor, weight: ?*Tensor, bias: ?*Tensor, n: i64, c: i64, hxw: i64, group: i64, eps: f64
+        self: *const Tensor, weight: ?*const Tensor, bias: ?*const Tensor, n: i64, c: i64, hxw: i64, group: i64, eps: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_native_group_norm(@ptrCast(&c_tensors), self.c_tensor,
@@ -20511,7 +20747,7 @@ pub const Tensor = struct {
     }
 
     pub fn nativeGroupNormOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, out2: *Tensor, weight: ?*Tensor, bias: ?*Tensor, n: i64, c: i64, hxw: i64, group: i64, eps: f64
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, weight: ?*const Tensor, bias: ?*const Tensor, n: i64, c: i64, hxw: i64, group: i64, eps: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_native_group_norm_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -20530,7 +20766,7 @@ pub const Tensor = struct {
     }
 
     pub fn nativeLayerNorm(
-        self: *const Tensor, normalized_shape: []i64, weight: ?*Tensor, bias: ?*Tensor, eps: f64
+        self: *const Tensor, normalized_shape: []i64, weight: ?*const Tensor, bias: ?*const Tensor, eps: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_native_layer_norm(@ptrCast(&c_tensors), self.c_tensor,
@@ -20543,7 +20779,7 @@ pub const Tensor = struct {
     }
 
     pub fn nativeLayerNormOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, out2: *Tensor, normalized_shape: []i64, weight: ?*Tensor, bias: ?*Tensor, eps: f64
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, normalized_shape: []i64, weight: ?*const Tensor, bias: ?*const Tensor, eps: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_native_layer_norm_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -20568,7 +20804,7 @@ pub const Tensor = struct {
     }
 
     pub fn nativeNormOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_native_norm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20591,7 +20827,7 @@ pub const Tensor = struct {
     }
 
     pub fn nativeNormScalaroptDimDtypeOut(
-        self: *const Tensor, out: *Tensor, p: Scalar, dim_: []i64, keepdim: bool, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, p: Scalar, dim_: []i64, keepdim: bool, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_native_norm_scalaropt_dim_dtype_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20625,7 +20861,7 @@ pub const Tensor = struct {
     }
 
     pub fn neScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ne_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20636,7 +20872,7 @@ pub const Tensor = struct {
     }
 
     pub fn neTensor(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ne_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -20646,7 +20882,7 @@ pub const Tensor = struct {
     }
 
     pub fn neTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ne_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -20656,7 +20892,7 @@ pub const Tensor = struct {
     }
 
     pub fn neTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ne_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20685,7 +20921,7 @@ pub const Tensor = struct {
     }
 
     pub fn negOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_neg_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20713,7 +20949,7 @@ pub const Tensor = struct {
     }
 
     pub fn negativeOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_negative_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20734,18 +20970,18 @@ pub const Tensor = struct {
     }
 
     pub fn newEmpty(
-        self: *const Tensor, size_: []i64, options: TensorOptions
+        self: *const Tensor, size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_empty(@ptrCast(&c_tensors), self.c_tensor,
                 size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn newEmptyOut(
-        self: *const Tensor, out: *Tensor, size_: []i64
+        self: *const Tensor, out: *const Tensor, size_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_empty_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20756,19 +20992,19 @@ pub const Tensor = struct {
     }
 
     pub fn newEmptyStrided(
-        self: *const Tensor, size_: []i64, stride_: []i64, options: TensorOptions
+        self: *const Tensor, size_: []i64, stride_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_empty_strided(@ptrCast(&c_tensors), self.c_tensor,
                 size_.ptr, @intCast(size_.len),
                 stride_.ptr, @intCast(stride_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn newEmptyStridedOut(
-        self: *const Tensor, out: *Tensor, size_: []i64, stride_: []i64
+        self: *const Tensor, out: *const Tensor, size_: []i64, stride_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_empty_strided_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20780,19 +21016,19 @@ pub const Tensor = struct {
     }
 
     pub fn newFull(
-        self: *const Tensor, size_: []i64, fill_value: Scalar, options: TensorOptions
+        self: *const Tensor, size_: []i64, fill_value: Scalar, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_full(@ptrCast(&c_tensors), self.c_tensor,
                 size_.ptr, @intCast(size_.len),
                 fill_value.into().c_scalar,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn newFullOut(
-        self: *const Tensor, out: *Tensor, size_: []i64, fill_value: Scalar
+        self: *const Tensor, out: *const Tensor, size_: []i64, fill_value: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_full_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20804,18 +21040,18 @@ pub const Tensor = struct {
     }
 
     pub fn newOnes(
-        self: *const Tensor, size_: []i64, options: TensorOptions
+        self: *const Tensor, size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_ones(@ptrCast(&c_tensors), self.c_tensor,
                 size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn newOnesOut(
-        self: *const Tensor, out: *Tensor, size_: []i64
+        self: *const Tensor, out: *const Tensor, size_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_ones_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20826,18 +21062,18 @@ pub const Tensor = struct {
     }
 
     pub fn newZeros(
-        self: *const Tensor, size_: []i64, options: TensorOptions
+        self: *const Tensor, size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_zeros(@ptrCast(&c_tensors), self.c_tensor,
                 size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn newZerosOut(
-        self: *const Tensor, out: *Tensor, size_: []i64
+        self: *const Tensor, out: *const Tensor, size_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_zeros_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20848,7 +21084,7 @@ pub const Tensor = struct {
     }
 
     pub fn nextafter(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nextafter(@ptrCast(&c_tensors), self.c_tensor,
@@ -20858,7 +21094,7 @@ pub const Tensor = struct {
     }
 
     pub fn nextafter_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nextafter_(@ptrCast(&c_tensors), self.c_tensor,
@@ -20868,7 +21104,7 @@ pub const Tensor = struct {
     }
 
     pub fn nextafterOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nextafter_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20879,7 +21115,7 @@ pub const Tensor = struct {
     }
 
     pub fn nllLoss(
-        self: *const Tensor, target: *Tensor, weight: ?*Tensor, reduction: i64, ignore_index: i64
+        self: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nll_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -20892,7 +21128,7 @@ pub const Tensor = struct {
     }
 
     pub fn nllLoss2d(
-        self: *const Tensor, target: *Tensor, weight: ?*Tensor, reduction: i64, ignore_index: i64
+        self: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nll_loss2d(@ptrCast(&c_tensors), self.c_tensor,
@@ -20905,7 +21141,7 @@ pub const Tensor = struct {
     }
 
     pub fn nllLoss2dBackward(
-        self: *const Tensor, grad_output: *Tensor, target: *Tensor, weight: ?*Tensor, reduction: i64, ignore_index: i64, total_weight: *Tensor
+        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64, total_weight: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nll_loss2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -20920,7 +21156,7 @@ pub const Tensor = struct {
     }
 
     pub fn nllLoss2dBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, target: *Tensor, weight: ?*Tensor, reduction: i64, ignore_index: i64, total_weight: *Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64, total_weight: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nll_loss2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -20936,7 +21172,7 @@ pub const Tensor = struct {
     }
 
     pub fn nllLoss2dOut(
-        self: *const Tensor, out: *Tensor, target: *Tensor, weight: ?*Tensor, reduction: i64, ignore_index: i64
+        self: *const Tensor, out: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nll_loss2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -20950,7 +21186,7 @@ pub const Tensor = struct {
     }
 
     pub fn nllLossBackward(
-        self: *const Tensor, grad_output: *Tensor, target: *Tensor, weight: ?*Tensor, reduction: i64, ignore_index: i64, total_weight: *Tensor
+        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64, total_weight: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nll_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -20965,7 +21201,7 @@ pub const Tensor = struct {
     }
 
     pub fn nllLossBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, target: *Tensor, weight: ?*Tensor, reduction: i64, ignore_index: i64, total_weight: *Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64, total_weight: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nll_loss_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -20981,7 +21217,7 @@ pub const Tensor = struct {
     }
 
     pub fn nllLossNd(
-        self: *const Tensor, target: *Tensor, weight: ?*Tensor, reduction: i64, ignore_index: i64
+        self: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nll_loss_nd(@ptrCast(&c_tensors), self.c_tensor,
@@ -20994,7 +21230,7 @@ pub const Tensor = struct {
     }
 
     pub fn nllLossOut(
-        self: *const Tensor, out: *Tensor, target: *Tensor, weight: ?*Tensor, reduction: i64, ignore_index: i64
+        self: *const Tensor, out: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nll_loss_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21020,19 +21256,19 @@ pub const Tensor = struct {
         self: *const Tensor, 
     ) []Tensor {
         const c_tensors = __c.atg_nonzero_numpy(self.c_tensor);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
 
     pub fn nonzeroOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nonzero_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21053,7 +21289,7 @@ pub const Tensor = struct {
     }
 
     pub fn nonzeroStaticOut(
-        self: *const Tensor, out: *Tensor, size_: i64, fill_value: i64
+        self: *const Tensor, out: *const Tensor, size_: i64, fill_value: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nonzero_static_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21074,7 +21310,7 @@ pub const Tensor = struct {
     }
 
     pub fn normDtypeOut(
-        self: *const Tensor, out: *Tensor, p: Scalar, dim_: []i64, keepdim: bool, dtype: Kind
+        self: *const Tensor, out: *const Tensor, p: Scalar, dim_: []i64, keepdim: bool, dtype: Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_norm_dtype_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21088,7 +21324,7 @@ pub const Tensor = struct {
     }
 
     pub fn normExceptDim(
-        v: *Tensor, pow_: i64, dim_: i64
+        v: *const Tensor, pow_: i64, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_norm_except_dim(@ptrCast(&c_tensors), v.c_tensor,
@@ -21099,7 +21335,7 @@ pub const Tensor = struct {
     }
 
     pub fn normOut(
-        self: *const Tensor, out: *Tensor, p: Scalar, dim_: []i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, p: Scalar, dim_: []i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_norm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21112,7 +21348,7 @@ pub const Tensor = struct {
     }
 
     pub fn normScalarOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_norm_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21158,7 +21394,7 @@ pub const Tensor = struct {
     }
 
     pub fn normScalaroptDtypeOut(
-        self: *const Tensor, out: *Tensor, p: Scalar, dtype: Kind
+        self: *const Tensor, out: *const Tensor, p: Scalar, dtype: Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_norm_scalaropt_dtype_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21212,7 +21448,7 @@ pub const Tensor = struct {
     }
 
     pub fn notEqualScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_not_equal_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21223,7 +21459,7 @@ pub const Tensor = struct {
     }
 
     pub fn notEqualTensor(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_not_equal_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -21233,7 +21469,7 @@ pub const Tensor = struct {
     }
 
     pub fn notEqualTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_not_equal_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -21243,7 +21479,7 @@ pub const Tensor = struct {
     }
 
     pub fn notEqualTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_not_equal_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21275,7 +21511,7 @@ pub const Tensor = struct {
     }
 
     pub fn nuclearNormDimOut(
-        self: *const Tensor, out: *Tensor, dim_: []i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: []i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nuclear_norm_dim_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21287,7 +21523,7 @@ pub const Tensor = struct {
     }
 
     pub fn nuclearNormOut(
-        self: *const Tensor, out: *Tensor, keepdim: bool
+        self: *const Tensor, out: *const Tensor, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nuclear_norm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21317,11 +21553,11 @@ pub const Tensor = struct {
     }
 
     pub fn ones(
-        size_: []i64, options: TensorOptions
+        size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ones(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -21336,7 +21572,7 @@ pub const Tensor = struct {
     }
 
     pub fn onesLikeOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ones_like_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21346,7 +21582,7 @@ pub const Tensor = struct {
     }
 
     pub fn onesOut(
-        out: *Tensor, size_: []i64
+        out: *const Tensor, size_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ones_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21356,7 +21592,7 @@ pub const Tensor = struct {
     }
 
     pub fn orgqr(
-        self: *const Tensor, input2: *Tensor
+        self: *const Tensor, input2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_orgqr(@ptrCast(&c_tensors), self.c_tensor,
@@ -21366,7 +21602,7 @@ pub const Tensor = struct {
     }
 
     pub fn orgqrOut(
-        self: *const Tensor, out: *Tensor, input2: *Tensor
+        self: *const Tensor, out: *const Tensor, input2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_orgqr_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21377,7 +21613,7 @@ pub const Tensor = struct {
     }
 
     pub fn ormqr(
-        self: *const Tensor, input2: *Tensor, input3: *Tensor, left: bool, transpose_: bool
+        self: *const Tensor, input2: *const Tensor, input3: *const Tensor, left: bool, transpose_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ormqr(@ptrCast(&c_tensors), self.c_tensor,
@@ -21390,7 +21626,7 @@ pub const Tensor = struct {
     }
 
     pub fn ormqrOut(
-        self: *const Tensor, out: *Tensor, input2: *Tensor, input3: *Tensor, left: bool, transpose_: bool
+        self: *const Tensor, out: *const Tensor, input2: *const Tensor, input3: *const Tensor, left: bool, transpose_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ormqr_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21404,7 +21640,7 @@ pub const Tensor = struct {
     }
 
     pub fn outer(
-        self: *const Tensor, vec2: *Tensor
+        self: *const Tensor, vec2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_outer(@ptrCast(&c_tensors), self.c_tensor,
@@ -21414,7 +21650,7 @@ pub const Tensor = struct {
     }
 
     pub fn outerOut(
-        self: *const Tensor, out: *Tensor, vec2: *Tensor
+        self: *const Tensor, out: *const Tensor, vec2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_outer_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21433,7 +21669,7 @@ pub const Tensor = struct {
     }
 
     pub fn pad(
-        self: *const Tensor, padding: []i64, mode_: []u8, value: ?f64
+        self: *const Tensor, padding: []i64, mode_: []const u8, value: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_pad(@ptrCast(&c_tensors), self.c_tensor,
@@ -21445,7 +21681,7 @@ pub const Tensor = struct {
     }
 
     pub fn padSequence(
-        sequences: []*Tensor, batch_first: bool, padding_value: f64
+        sequences: []*const Tensor, batch_first: bool, padding_value: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_pad_sequence(@ptrCast(&c_tensors), ptrList(sequences).ptr, @intCast(sequences.len),
@@ -21456,7 +21692,7 @@ pub const Tensor = struct {
     }
 
     pub fn pairwiseDistance(
-        x1: *Tensor, x2: *Tensor, p: f64, eps: f64, keepdim: bool
+        x1: *const Tensor, x2: *const Tensor, p: f64, eps: f64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_pairwise_distance(@ptrCast(&c_tensors), x1.c_tensor,
@@ -21499,7 +21735,7 @@ pub const Tensor = struct {
     }
 
     pub fn permuteCopyOut(
-        self: *const Tensor, out: *Tensor, dims: []i64
+        self: *const Tensor, out: *const Tensor, dims: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_permute_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21540,7 +21776,7 @@ pub const Tensor = struct {
     }
 
     pub fn pixelShuffleOut(
-        self: *const Tensor, out: *Tensor, upscale_factor: i64
+        self: *const Tensor, out: *const Tensor, upscale_factor: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_pixel_shuffle_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21561,7 +21797,7 @@ pub const Tensor = struct {
     }
 
     pub fn pixelUnshuffleOut(
-        self: *const Tensor, out: *Tensor, downscale_factor: i64
+        self: *const Tensor, out: *const Tensor, downscale_factor: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_pixel_unshuffle_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21581,7 +21817,7 @@ pub const Tensor = struct {
     }
 
     pub fn poissonNllLoss(
-        self: *const Tensor, target: *Tensor, log_input: bool, full_: bool, eps: f64, reduction: i64
+        self: *const Tensor, target: *const Tensor, log_input: bool, full_: bool, eps: f64, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_poisson_nll_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -21595,7 +21831,7 @@ pub const Tensor = struct {
     }
 
     pub fn poissonOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_poisson_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21605,7 +21841,7 @@ pub const Tensor = struct {
     }
 
     pub fn polar(
-        abs_: *Tensor, angle_: *Tensor
+        abs_: *const Tensor, angle_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_polar(@ptrCast(&c_tensors), abs_.c_tensor,
@@ -21615,7 +21851,7 @@ pub const Tensor = struct {
     }
 
     pub fn polarOut(
-        out: *Tensor, abs_: *Tensor, angle_: *Tensor
+        out: *const Tensor, abs_: *const Tensor, angle_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_polar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21646,7 +21882,7 @@ pub const Tensor = struct {
     }
 
     pub fn polygammaOut(
-        self: *const Tensor, out: *Tensor, n: i64
+        self: *const Tensor, out: *const Tensor, n: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_polygamma_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21666,7 +21902,7 @@ pub const Tensor = struct {
     }
 
     pub fn pow(
-        self: *const Tensor, exponent: *Tensor
+        self: *const Tensor, exponent: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_pow(@ptrCast(&c_tensors), self.c_tensor,
@@ -21686,7 +21922,7 @@ pub const Tensor = struct {
     }
 
     pub fn powScalar(
-        self_scalar: Scalar, exponent: *Tensor
+        self_scalar: Scalar, exponent: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_pow_scalar(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
@@ -21696,7 +21932,7 @@ pub const Tensor = struct {
     }
 
     pub fn powScalarOut(
-        out: *Tensor, self_scalar: Scalar, exponent: *Tensor
+        out: *const Tensor, self_scalar: Scalar, exponent: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_pow_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21707,7 +21943,7 @@ pub const Tensor = struct {
     }
 
     pub fn powTensor_(
-        self: *Tensor, exponent: *Tensor
+        self: *Tensor, exponent: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_pow_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -21727,7 +21963,7 @@ pub const Tensor = struct {
     }
 
     pub fn powTensorScalarOut(
-        self: *const Tensor, out: *Tensor, exponent: Scalar
+        self: *const Tensor, out: *const Tensor, exponent: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_pow_tensor_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21738,7 +21974,7 @@ pub const Tensor = struct {
     }
 
     pub fn powTensorTensorOut(
-        self: *const Tensor, out: *Tensor, exponent: *Tensor
+        self: *const Tensor, out: *const Tensor, exponent: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_pow_tensor_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21749,7 +21985,7 @@ pub const Tensor = struct {
     }
 
     pub fn prelu(
-        self: *const Tensor, weight: *Tensor
+        self: *const Tensor, weight: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_prelu(@ptrCast(&c_tensors), self.c_tensor,
@@ -21781,7 +22017,7 @@ pub const Tensor = struct {
     }
 
     pub fn prodIntOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, keepdim: bool, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, dim_: i64, keepdim: bool, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_prod_int_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21794,7 +22030,7 @@ pub const Tensor = struct {
     }
 
     pub fn prodOut(
-        self: *const Tensor, out: *Tensor, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_prod_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21805,7 +22041,7 @@ pub const Tensor = struct {
     }
 
     pub fn put(
-        self: *const Tensor, index_: *Tensor, source: *Tensor, accumulate: bool
+        self: *const Tensor, index_: *const Tensor, source: *const Tensor, accumulate: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_put(@ptrCast(&c_tensors), self.c_tensor,
@@ -21817,7 +22053,7 @@ pub const Tensor = struct {
     }
 
     pub fn put_(
-        self: *Tensor, index_: *Tensor, source: *Tensor, accumulate: bool
+        self: *Tensor, index_: *const Tensor, source: *const Tensor, accumulate: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_put_(@ptrCast(&c_tensors), self.c_tensor,
@@ -21829,7 +22065,7 @@ pub const Tensor = struct {
     }
 
     pub fn putOut(
-        self: *const Tensor, out: *Tensor, index_: *Tensor, source: *Tensor, accumulate: bool
+        self: *const Tensor, out: *const Tensor, index_: *const Tensor, source: *const Tensor, accumulate: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_put_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21859,7 +22095,7 @@ pub const Tensor = struct {
     }
 
     pub fn qPerChannelScalesOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_q_per_channel_scales_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21878,7 +22114,7 @@ pub const Tensor = struct {
     }
 
     pub fn qPerChannelZeroPointsOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_q_per_channel_zero_points_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21914,7 +22150,7 @@ pub const Tensor = struct {
     }
 
     pub fn qrQ(
-        self: *const Tensor, q: *Tensor, r: *Tensor, some: bool
+        self: *const Tensor, q: *const Tensor, r: *const Tensor, some: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_qr_q(@ptrCast(&c_tensors), q.c_tensor,
@@ -21926,7 +22162,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantile(
-        self: *const Tensor, q: *Tensor, dim_: ?i64, keepdim: bool, interpolation: []u8
+        self: *const Tensor, q: *const Tensor, dim_: ?i64, keepdim: bool, interpolation: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantile(@ptrCast(&c_tensors), self.c_tensor,
@@ -21939,7 +22175,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantileOut(
-        self: *const Tensor, out: *Tensor, q: *Tensor, dim_: ?i64, keepdim: bool, interpolation: []u8
+        self: *const Tensor, out: *const Tensor, q: *const Tensor, dim_: ?i64, keepdim: bool, interpolation: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantile_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21953,7 +22189,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantileScalar(
-        self: *const Tensor, q: f64, dim_: ?i64, keepdim: bool, interpolation: []u8
+        self: *const Tensor, q: f64, dim_: ?i64, keepdim: bool, interpolation: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantile_scalar(@ptrCast(&c_tensors), self.c_tensor,
@@ -21966,7 +22202,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantileScalarOut(
-        self: *const Tensor, out: *Tensor, q: f64, dim_: ?i64, keepdim: bool, interpolation: []u8
+        self: *const Tensor, out: *const Tensor, q: f64, dim_: ?i64, keepdim: bool, interpolation: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantile_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21980,7 +22216,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantizePerChannel(
-        self: *const Tensor, scales: *Tensor, zero_points: *Tensor, axis: i64, dtype: Kind
+        self: *const Tensor, scales: *const Tensor, zero_points: *const Tensor, axis: i64, dtype: Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantize_per_channel(@ptrCast(&c_tensors), self.c_tensor,
@@ -21993,7 +22229,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantizePerChannelOut(
-        self: *const Tensor, out: *Tensor, scales: *Tensor, zero_points: *Tensor, axis: i64, dtype: Kind
+        self: *const Tensor, out: *const Tensor, scales: *const Tensor, zero_points: *const Tensor, axis: i64, dtype: Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantize_per_channel_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22030,7 +22266,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantizePerTensorDynamicOut(
-        self: *const Tensor, out: *Tensor, dtype: Kind, reduce_range: bool
+        self: *const Tensor, out: *const Tensor, dtype: Kind, reduce_range: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantize_per_tensor_dynamic_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22042,7 +22278,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantizePerTensorOut(
-        self: *const Tensor, out: *Tensor, scale: f64, zero_point: i64, dtype: Kind
+        self: *const Tensor, out: *const Tensor, scale: f64, zero_point: i64, dtype: Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantize_per_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22055,7 +22291,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantizePerTensorTensorQparams(
-        self: *const Tensor, scale: *Tensor, zero_point: *Tensor, dtype: Kind
+        self: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, dtype: Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantize_per_tensor_tensor_qparams(@ptrCast(&c_tensors), self.c_tensor,
@@ -22067,7 +22303,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantizePerTensorTensorQparamsOut(
-        self: *const Tensor, out: *Tensor, scale: *Tensor, zero_point: *Tensor, dtype: Kind
+        self: *const Tensor, out: *const Tensor, scale: *const Tensor, zero_point: *const Tensor, dtype: Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantize_per_tensor_tensor_qparams_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22080,25 +22316,25 @@ pub const Tensor = struct {
     }
 
     pub fn quantizePerTensorTensors(
-        tensors: []*Tensor, scales: *Tensor, zero_points: *Tensor, dtype: Kind
+        tensors: []*const Tensor, scales: *const Tensor, zero_points: *const Tensor, dtype: Kind
     ) []Tensor {
         const c_tensors = __c.atg_quantize_per_tensor_tensors(ptrList(tensors).ptr, @intCast(tensors.len),
                 scales.c_tensor,
                 zero_points.c_tensor,
                 dtype.cInt());
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
 
     pub fn quantizePerTensorTensorsOut(
-        out: []*Tensor, tensors: []*Tensor, scales: *Tensor, zero_points: *Tensor, dtype: Kind
+        out: []*const Tensor, tensors: []*const Tensor, scales: *const Tensor, zero_points: *const Tensor, dtype: Kind
     ) void {
         __c.atg_quantize_per_tensor_tensors_out(ptrList(out).ptr, @intCast(out.len),
                 ptrList(tensors).ptr, @intCast(tensors.len),
@@ -22110,7 +22346,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantizedBatchNorm(
-        self: *const Tensor, weight: ?*Tensor, bias: ?*Tensor, mean_: *Tensor, var_: *Tensor, eps: f64, output_scale: f64, output_zero_point: i64
+        self: *const Tensor, weight: ?*const Tensor, bias: ?*const Tensor, mean_: *const Tensor, var_: *const Tensor, eps: f64, output_scale: f64, output_zero_point: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantized_batch_norm(@ptrCast(&c_tensors), self.c_tensor,
@@ -22126,7 +22362,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantizedBatchNormOut(
-        self: *const Tensor, out: *Tensor, weight: ?*Tensor, bias: ?*Tensor, mean_: *Tensor, var_: *Tensor, eps: f64, output_scale: f64, output_zero_point: i64
+        self: *const Tensor, out: *const Tensor, weight: ?*const Tensor, bias: ?*const Tensor, mean_: *const Tensor, var_: *const Tensor, eps: f64, output_scale: f64, output_zero_point: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantized_batch_norm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22143,7 +22379,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantizedGruCell(
-        self: *const Tensor, hx: *Tensor, w_ih: *Tensor, w_hh: *Tensor, b_ih: *Tensor, b_hh: *Tensor, packed_ih: *Tensor, packed_hh: *Tensor, col_offsets_ih: *Tensor, col_offsets_hh: *Tensor, scale_ih: Scalar, scale_hh: Scalar, zero_point_ih: Scalar, zero_point_hh: Scalar
+        self: *const Tensor, hx: *const Tensor, w_ih: *const Tensor, w_hh: *const Tensor, b_ih: *const Tensor, b_hh: *const Tensor, packed_ih: *const Tensor, packed_hh: *const Tensor, col_offsets_ih: *const Tensor, col_offsets_hh: *const Tensor, scale_ih: Scalar, scale_hh: Scalar, zero_point_ih: Scalar, zero_point_hh: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantized_gru_cell(@ptrCast(&c_tensors), self.c_tensor,
@@ -22165,7 +22401,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantizedLstmCell(
-        self: *const Tensor, hx: []*Tensor, w_ih: *Tensor, w_hh: *Tensor, b_ih: *Tensor, b_hh: *Tensor, packed_ih: *Tensor, packed_hh: *Tensor, col_offsets_ih: *Tensor, col_offsets_hh: *Tensor, scale_ih: Scalar, scale_hh: Scalar, zero_point_ih: Scalar, zero_point_hh: Scalar
+        self: *const Tensor, hx: []*const Tensor, w_ih: *const Tensor, w_hh: *const Tensor, b_ih: *const Tensor, b_hh: *const Tensor, packed_ih: *const Tensor, packed_hh: *const Tensor, col_offsets_ih: *const Tensor, col_offsets_hh: *const Tensor, scale_ih: Scalar, scale_hh: Scalar, zero_point_ih: Scalar, zero_point_hh: Scalar
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_quantized_lstm_cell(@ptrCast(&c_tensors), self.c_tensor,
@@ -22201,7 +22437,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantizedMaxPool1dOut(
-        self: *const Tensor, out: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantized_max_pool1d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22230,7 +22466,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantizedMaxPool2dOut(
-        self: *const Tensor, out: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantized_max_pool2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22259,7 +22495,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantizedMaxPool3dOut(
-        self: *const Tensor, out: *Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantized_max_pool3d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22274,7 +22510,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantizedRnnReluCell(
-        self: *const Tensor, hx: *Tensor, w_ih: *Tensor, w_hh: *Tensor, b_ih: *Tensor, b_hh: *Tensor, packed_ih: *Tensor, packed_hh: *Tensor, col_offsets_ih: *Tensor, col_offsets_hh: *Tensor, scale_ih: Scalar, scale_hh: Scalar, zero_point_ih: Scalar, zero_point_hh: Scalar
+        self: *const Tensor, hx: *const Tensor, w_ih: *const Tensor, w_hh: *const Tensor, b_ih: *const Tensor, b_hh: *const Tensor, packed_ih: *const Tensor, packed_hh: *const Tensor, col_offsets_ih: *const Tensor, col_offsets_hh: *const Tensor, scale_ih: Scalar, scale_hh: Scalar, zero_point_ih: Scalar, zero_point_hh: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantized_rnn_relu_cell(@ptrCast(&c_tensors), self.c_tensor,
@@ -22296,7 +22532,7 @@ pub const Tensor = struct {
     }
 
     pub fn quantizedRnnTanhCell(
-        self: *const Tensor, hx: *Tensor, w_ih: *Tensor, w_hh: *Tensor, b_ih: *Tensor, b_hh: *Tensor, packed_ih: *Tensor, packed_hh: *Tensor, col_offsets_ih: *Tensor, col_offsets_hh: *Tensor, scale_ih: Scalar, scale_hh: Scalar, zero_point_ih: Scalar, zero_point_hh: Scalar
+        self: *const Tensor, hx: *const Tensor, w_ih: *const Tensor, w_hh: *const Tensor, b_ih: *const Tensor, b_hh: *const Tensor, packed_ih: *const Tensor, packed_hh: *const Tensor, col_offsets_ih: *const Tensor, col_offsets_hh: *const Tensor, scale_ih: Scalar, scale_hh: Scalar, zero_point_ih: Scalar, zero_point_hh: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantized_rnn_tanh_cell(@ptrCast(&c_tensors), self.c_tensor,
@@ -22336,7 +22572,7 @@ pub const Tensor = struct {
     }
 
     pub fn rad2degOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rad2deg_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22346,11 +22582,11 @@ pub const Tensor = struct {
     }
 
     pub fn rand(
-        size_: []i64, options: TensorOptions
+        size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rand(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22365,7 +22601,7 @@ pub const Tensor = struct {
     }
 
     pub fn randLikeOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rand_like_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22375,7 +22611,7 @@ pub const Tensor = struct {
     }
 
     pub fn randOut(
-        out: *Tensor, size_: []i64
+        out: *const Tensor, size_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rand_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22385,12 +22621,12 @@ pub const Tensor = struct {
     }
 
     pub fn randint(
-        high: i64, size_: []i64, options: TensorOptions
+        high: i64, size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_randint(@ptrCast(&c_tensors), high,
                 size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22417,7 +22653,7 @@ pub const Tensor = struct {
     }
 
     pub fn randintLikeLowDtypeOut(
-        self: *const Tensor, out: *Tensor, low: i64, high: i64
+        self: *const Tensor, out: *const Tensor, low: i64, high: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_randint_like_low_dtype_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22429,7 +22665,7 @@ pub const Tensor = struct {
     }
 
     pub fn randintLikeOut(
-        self: *const Tensor, out: *Tensor, high: i64
+        self: *const Tensor, out: *const Tensor, high: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_randint_like_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22440,19 +22676,19 @@ pub const Tensor = struct {
     }
 
     pub fn randintLow(
-        low: i64, high: i64, size_: []i64, options: TensorOptions
+        low: i64, high: i64, size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_randint_low(@ptrCast(&c_tensors), low,
                 high,
                 size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn randintLowOut(
-        out: *Tensor, low: i64, high: i64, size_: []i64
+        out: *const Tensor, low: i64, high: i64, size_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_randint_low_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22464,7 +22700,7 @@ pub const Tensor = struct {
     }
 
     pub fn randintOut(
-        out: *Tensor, high: i64, size_: []i64
+        out: *const Tensor, high: i64, size_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_randint_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22475,11 +22711,11 @@ pub const Tensor = struct {
     }
 
     pub fn randn(
-        size_: []i64, options: TensorOptions
+        size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_randn(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22494,7 +22730,7 @@ pub const Tensor = struct {
     }
 
     pub fn randnLikeOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_randn_like_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22504,7 +22740,7 @@ pub const Tensor = struct {
     }
 
     pub fn randnOut(
-        out: *Tensor, size_: []i64
+        out: *const Tensor, size_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_randn_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22554,7 +22790,7 @@ pub const Tensor = struct {
     }
 
     pub fn randomFromOut(
-        self: *const Tensor, out: *Tensor, from: i64, to_: ?i64
+        self: *const Tensor, out: *const Tensor, from: i64, to_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_random_from_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22566,7 +22802,7 @@ pub const Tensor = struct {
     }
 
     pub fn randomOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_random_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22596,7 +22832,7 @@ pub const Tensor = struct {
     }
 
     pub fn randomToOut(
-        self: *const Tensor, out: *Tensor, to_: i64
+        self: *const Tensor, out: *const Tensor, to_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_random_to_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22607,17 +22843,17 @@ pub const Tensor = struct {
     }
 
     pub fn randperm(
-        n: i64, options: TensorOptions
+        n: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_randperm(@ptrCast(&c_tensors), n,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn randpermOut(
-        out: *Tensor, n: i64
+        out: *const Tensor, n: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_randperm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22627,18 +22863,18 @@ pub const Tensor = struct {
     }
 
     pub fn range(
-        start: Scalar, end: Scalar, options: TensorOptions
+        start: Scalar, end: Scalar, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_range(@ptrCast(&c_tensors), start.into().c_scalar,
                 end.into().c_scalar,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn rangeOut(
-        out: *Tensor, start: Scalar, end: Scalar
+        out: *const Tensor, start: Scalar, end: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_range_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22649,7 +22885,7 @@ pub const Tensor = struct {
     }
 
     pub fn rangeOut_(
-        out: *Tensor, start: Scalar, end: Scalar
+        out: *const Tensor, start: Scalar, end: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_range_out_(@ptrCast(&c_tensors), out.c_tensor,
@@ -22660,12 +22896,12 @@ pub const Tensor = struct {
     }
 
     pub fn rangeStep(
-        start: Scalar, end: Scalar, options: TensorOptions
+        start: Scalar, end: Scalar, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_range_step(@ptrCast(&c_tensors), start.into().c_scalar,
                 end.into().c_scalar,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22707,7 +22943,7 @@ pub const Tensor = struct {
     }
 
     pub fn reciprocalOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reciprocal_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22727,7 +22963,7 @@ pub const Tensor = struct {
     }
 
     pub fn reflectionPad1dBackward(
-        self: *const Tensor, grad_output: *Tensor, padding: []i64
+        self: *const Tensor, grad_output: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad1d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -22738,7 +22974,7 @@ pub const Tensor = struct {
     }
 
     pub fn reflectionPad1dBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, padding: []i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad1d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -22750,7 +22986,7 @@ pub const Tensor = struct {
     }
 
     pub fn reflectionPad1dOut(
-        self: *const Tensor, out: *Tensor, padding: []i64
+        self: *const Tensor, out: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad1d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22771,7 +23007,7 @@ pub const Tensor = struct {
     }
 
     pub fn reflectionPad2dBackward(
-        self: *const Tensor, grad_output: *Tensor, padding: []i64
+        self: *const Tensor, grad_output: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -22782,7 +23018,7 @@ pub const Tensor = struct {
     }
 
     pub fn reflectionPad2dBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, padding: []i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -22794,7 +23030,7 @@ pub const Tensor = struct {
     }
 
     pub fn reflectionPad2dOut(
-        self: *const Tensor, out: *Tensor, padding: []i64
+        self: *const Tensor, out: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22815,7 +23051,7 @@ pub const Tensor = struct {
     }
 
     pub fn reflectionPad3dBackward(
-        self: *const Tensor, grad_output: *Tensor, padding: []i64
+        self: *const Tensor, grad_output: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad3d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -22826,7 +23062,7 @@ pub const Tensor = struct {
     }
 
     pub fn reflectionPad3dBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, padding: []i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad3d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -22838,7 +23074,7 @@ pub const Tensor = struct {
     }
 
     pub fn reflectionPad3dOut(
-        self: *const Tensor, out: *Tensor, padding: []i64
+        self: *const Tensor, out: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad3d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22885,7 +23121,7 @@ pub const Tensor = struct {
     }
 
     pub fn reluOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_relu_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22915,7 +23151,7 @@ pub const Tensor = struct {
     }
 
     pub fn remainderScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_remainder_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22926,7 +23162,7 @@ pub const Tensor = struct {
     }
 
     pub fn remainderScalarTensor(
-        self_scalar: Scalar, other: *Tensor
+        self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_remainder_scalar_tensor(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
@@ -22936,7 +23172,7 @@ pub const Tensor = struct {
     }
 
     pub fn remainderScalarTensorOut(
-        out: *Tensor, self_scalar: Scalar, other: *Tensor
+        out: *const Tensor, self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_remainder_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22947,7 +23183,7 @@ pub const Tensor = struct {
     }
 
     pub fn remainderTensor(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_remainder_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -22957,7 +23193,7 @@ pub const Tensor = struct {
     }
 
     pub fn remainderTensor_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_remainder_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -22967,7 +23203,7 @@ pub const Tensor = struct {
     }
 
     pub fn remainderTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_remainder_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23002,7 +23238,7 @@ pub const Tensor = struct {
     }
 
     pub fn renormOut(
-        self: *const Tensor, out: *Tensor, p: Scalar, dim_: i64, maxnorm: Scalar
+        self: *const Tensor, out: *const Tensor, p: Scalar, dim_: i64, maxnorm: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_renorm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23025,7 +23261,7 @@ pub const Tensor = struct {
     }
 
     pub fn repeatInterleave(
-        repeats: *Tensor, output_size: ?i64
+        repeats: *const Tensor, output_size: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_repeat_interleave(@ptrCast(&c_tensors), repeats.c_tensor,
@@ -23047,7 +23283,7 @@ pub const Tensor = struct {
     }
 
     pub fn repeatInterleaveSelfTensor(
-        self: *const Tensor, repeats: *Tensor, dim_: ?i64, output_size: ?i64
+        self: *const Tensor, repeats: *const Tensor, dim_: ?i64, output_size: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_repeat_interleave_self_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -23059,7 +23295,7 @@ pub const Tensor = struct {
     }
 
     pub fn repeatInterleaveTensorOut(
-        out: *Tensor, repeats: *Tensor, output_size: ?i64
+        out: *const Tensor, repeats: *const Tensor, output_size: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_repeat_interleave_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23070,7 +23306,7 @@ pub const Tensor = struct {
     }
 
     pub fn repeatOut(
-        self: *const Tensor, out: *Tensor, repeats: []i64
+        self: *const Tensor, out: *const Tensor, repeats: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_repeat_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23091,7 +23327,7 @@ pub const Tensor = struct {
     }
 
     pub fn replicationPad1dBackward(
-        self: *const Tensor, grad_output: *Tensor, padding: []i64
+        self: *const Tensor, grad_output: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad1d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -23102,7 +23338,7 @@ pub const Tensor = struct {
     }
 
     pub fn replicationPad1dBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, padding: []i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad1d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -23114,7 +23350,7 @@ pub const Tensor = struct {
     }
 
     pub fn replicationPad1dOut(
-        self: *const Tensor, out: *Tensor, padding: []i64
+        self: *const Tensor, out: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad1d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23135,7 +23371,7 @@ pub const Tensor = struct {
     }
 
     pub fn replicationPad2dBackward(
-        self: *const Tensor, grad_output: *Tensor, padding: []i64
+        self: *const Tensor, grad_output: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -23146,7 +23382,7 @@ pub const Tensor = struct {
     }
 
     pub fn replicationPad2dBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, padding: []i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -23158,7 +23394,7 @@ pub const Tensor = struct {
     }
 
     pub fn replicationPad2dOut(
-        self: *const Tensor, out: *Tensor, padding: []i64
+        self: *const Tensor, out: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23179,7 +23415,7 @@ pub const Tensor = struct {
     }
 
     pub fn replicationPad3dBackward(
-        self: *const Tensor, grad_output: *Tensor, padding: []i64
+        self: *const Tensor, grad_output: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad3d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -23190,7 +23426,7 @@ pub const Tensor = struct {
     }
 
     pub fn replicationPad3dBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, padding: []i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad3d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -23202,7 +23438,7 @@ pub const Tensor = struct {
     }
 
     pub fn replicationPad3dOut(
-        self: *const Tensor, out: *Tensor, padding: []i64
+        self: *const Tensor, out: *const Tensor, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad3d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23233,7 +23469,7 @@ pub const Tensor = struct {
     }
 
     pub fn reshapeAs(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reshape_as(@ptrCast(&c_tensors), self.c_tensor,
@@ -23263,7 +23499,7 @@ pub const Tensor = struct {
     }
 
     pub fn resizeAs(
-        self: *const Tensor, the_template: *Tensor
+        self: *const Tensor, the_template: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_resize_as(@ptrCast(&c_tensors), self.c_tensor,
@@ -23273,7 +23509,7 @@ pub const Tensor = struct {
     }
 
     pub fn resizeAs_(
-        self: *Tensor, the_template: *Tensor
+        self: *Tensor, the_template: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_resize_as_(@ptrCast(&c_tensors), self.c_tensor,
@@ -23283,7 +23519,7 @@ pub const Tensor = struct {
     }
 
     pub fn resizeAsOut(
-        self: *const Tensor, out: *Tensor, the_template: *Tensor
+        self: *const Tensor, out: *const Tensor, the_template: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_resize_as_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23294,7 +23530,7 @@ pub const Tensor = struct {
     }
 
     pub fn resizeAsSparse(
-        self: *const Tensor, the_template: *Tensor
+        self: *const Tensor, the_template: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_resize_as_sparse(@ptrCast(&c_tensors), self.c_tensor,
@@ -23304,7 +23540,7 @@ pub const Tensor = struct {
     }
 
     pub fn resizeAsSparse_(
-        self: *Tensor, the_template: *Tensor
+        self: *Tensor, the_template: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_resize_as_sparse_(@ptrCast(&c_tensors), self.c_tensor,
@@ -23314,7 +23550,7 @@ pub const Tensor = struct {
     }
 
     pub fn resizeAsSparseOut(
-        self: *const Tensor, out: *Tensor, the_template: *Tensor
+        self: *const Tensor, out: *const Tensor, the_template: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_resize_as_sparse_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23325,7 +23561,7 @@ pub const Tensor = struct {
     }
 
     pub fn resizeOut(
-        self: *const Tensor, out: *Tensor, size_: []i64
+        self: *const Tensor, out: *const Tensor, size_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_resize_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23362,7 +23598,7 @@ pub const Tensor = struct {
     }
 
     pub fn rnnRelu(
-        self: *const Tensor, hx: *Tensor, params: []*Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool, batch_first: bool
+        self: *const Tensor, hx: *const Tensor, params: []*const Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool, batch_first: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_rnn_relu(@ptrCast(&c_tensors), self.c_tensor,
@@ -23379,7 +23615,7 @@ pub const Tensor = struct {
     }
 
     pub fn rnnReluCell(
-        self: *const Tensor, hx: *Tensor, w_ih: *Tensor, w_hh: *Tensor, b_ih: ?*Tensor, b_hh: ?*Tensor
+        self: *const Tensor, hx: *const Tensor, w_ih: *const Tensor, w_hh: *const Tensor, b_ih: ?*const Tensor, b_hh: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rnn_relu_cell(@ptrCast(&c_tensors), self.c_tensor,
@@ -23393,7 +23629,7 @@ pub const Tensor = struct {
     }
 
     pub fn rnnReluData(
-        data_: *Tensor, batch_sizes: *Tensor, hx: *Tensor, params: []*Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool
+        data_: *const Tensor, batch_sizes: *const Tensor, hx: *const Tensor, params: []*const Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_rnn_relu_data(@ptrCast(&c_tensors), data_.c_tensor,
@@ -23410,7 +23646,7 @@ pub const Tensor = struct {
     }
 
     pub fn rnnTanh(
-        self: *const Tensor, hx: *Tensor, params: []*Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool, batch_first: bool
+        self: *const Tensor, hx: *const Tensor, params: []*const Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool, batch_first: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_rnn_tanh(@ptrCast(&c_tensors), self.c_tensor,
@@ -23427,7 +23663,7 @@ pub const Tensor = struct {
     }
 
     pub fn rnnTanhCell(
-        self: *const Tensor, hx: *Tensor, w_ih: *Tensor, w_hh: *Tensor, b_ih: ?*Tensor, b_hh: ?*Tensor
+        self: *const Tensor, hx: *const Tensor, w_ih: *const Tensor, w_hh: *const Tensor, b_ih: ?*const Tensor, b_hh: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rnn_tanh_cell(@ptrCast(&c_tensors), self.c_tensor,
@@ -23441,7 +23677,7 @@ pub const Tensor = struct {
     }
 
     pub fn rnnTanhData(
-        data_: *Tensor, batch_sizes: *Tensor, hx: *Tensor, params: []*Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool
+        data_: *const Tensor, batch_sizes: *const Tensor, hx: *const Tensor, params: []*const Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_rnn_tanh_data(@ptrCast(&c_tensors), data_.c_tensor,
@@ -23469,7 +23705,7 @@ pub const Tensor = struct {
     }
 
     pub fn rollOut(
-        self: *const Tensor, out: *Tensor, shifts: []i64, dims: []i64
+        self: *const Tensor, out: *const Tensor, shifts: []i64, dims: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_roll_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23492,7 +23728,7 @@ pub const Tensor = struct {
     }
 
     pub fn rot90Out(
-        self: *const Tensor, out: *Tensor, k: i64, dims: []i64
+        self: *const Tensor, out: *const Tensor, k: i64, dims: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rot90_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23542,7 +23778,7 @@ pub const Tensor = struct {
     }
 
     pub fn roundDecimalsOut(
-        self: *const Tensor, out: *Tensor, decimals: i64
+        self: *const Tensor, out: *const Tensor, decimals: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_round_decimals_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23553,7 +23789,7 @@ pub const Tensor = struct {
     }
 
     pub fn roundOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_round_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23581,7 +23817,7 @@ pub const Tensor = struct {
     }
 
     pub fn rowIndicesCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_row_indices_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23591,7 +23827,7 @@ pub const Tensor = struct {
     }
 
     pub fn rowStack(
-        tensors: []*Tensor
+        tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_row_stack(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len));
@@ -23600,7 +23836,7 @@ pub const Tensor = struct {
     }
 
     pub fn rowStackOut(
-        out: *Tensor, tensors: []*Tensor
+        out: *const Tensor, tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_row_stack_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23630,7 +23866,7 @@ pub const Tensor = struct {
     }
 
     pub fn rreluWithNoise(
-        self: *const Tensor, noise: *Tensor, training: bool
+        self: *const Tensor, noise: *const Tensor, training: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rrelu_with_noise(@ptrCast(&c_tensors), self.c_tensor,
@@ -23641,7 +23877,7 @@ pub const Tensor = struct {
     }
 
     pub fn rreluWithNoise_(
-        self: *Tensor, noise: *Tensor, training: bool
+        self: *Tensor, noise: *const Tensor, training: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rrelu_with_noise_(@ptrCast(&c_tensors), self.c_tensor,
@@ -23652,7 +23888,7 @@ pub const Tensor = struct {
     }
 
     pub fn rreluWithNoiseBackward(
-        self: *const Tensor, grad_output: *Tensor, noise: *Tensor, lower: Scalar, upper: Scalar, training: bool, self_is_result: bool
+        self: *const Tensor, grad_output: *const Tensor, noise: *const Tensor, lower: Scalar, upper: Scalar, training: bool, self_is_result: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rrelu_with_noise_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -23667,7 +23903,7 @@ pub const Tensor = struct {
     }
 
     pub fn rreluWithNoiseBackwardOut(
-        self: *const Tensor, out: *Tensor, grad_output: *Tensor, noise: *Tensor, lower: Scalar, upper: Scalar, training: bool, self_is_result: bool
+        self: *const Tensor, out: *const Tensor, grad_output: *const Tensor, noise: *const Tensor, lower: Scalar, upper: Scalar, training: bool, self_is_result: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rrelu_with_noise_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23683,7 +23919,7 @@ pub const Tensor = struct {
     }
 
     pub fn rreluWithNoiseOut(
-        self: *const Tensor, out: *Tensor, noise: *Tensor, training: bool
+        self: *const Tensor, out: *const Tensor, noise: *const Tensor, training: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rrelu_with_noise_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23713,7 +23949,7 @@ pub const Tensor = struct {
     }
 
     pub fn rsqrtOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rsqrt_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23723,7 +23959,7 @@ pub const Tensor = struct {
     }
 
     pub fn rsub(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rsub(@ptrCast(&c_tensors), self.c_tensor,
@@ -23743,7 +23979,7 @@ pub const Tensor = struct {
     }
 
     pub fn rsubScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rsub_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23754,7 +23990,7 @@ pub const Tensor = struct {
     }
 
     pub fn rsubTensorOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rsub_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23765,17 +24001,17 @@ pub const Tensor = struct {
     }
 
     pub fn scalarTensor(
-        s: Scalar, options: TensorOptions
+        s: Scalar, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scalar_tensor(@ptrCast(&c_tensors), s.into().c_scalar,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn scalarTensorOut(
-        out: *Tensor, s: Scalar
+        out: *const Tensor, s: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23785,7 +24021,7 @@ pub const Tensor = struct {
     }
 
     pub fn scaledDotProductAttention(
-        query: *Tensor, key: *Tensor, value: *Tensor, attn_mask: ?*Tensor, dropout_p: f64, is_causal: bool, scale: ?f64
+        query: *const Tensor, key: *const Tensor, value: *const Tensor, attn_mask: ?*const Tensor, dropout_p: f64, is_causal: bool, scale: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scaled_dot_product_attention(@ptrCast(&c_tensors), query.c_tensor,
@@ -23800,7 +24036,7 @@ pub const Tensor = struct {
     }
 
     pub fn scatter(
-        self: *const Tensor, dim_: i64, index_: *Tensor, src: *Tensor
+        self: *const Tensor, dim_: i64, index_: *const Tensor, src: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scatter(@ptrCast(&c_tensors), self.c_tensor,
@@ -23812,7 +24048,7 @@ pub const Tensor = struct {
     }
 
     pub fn scatter_(
-        self: *Tensor, dim_: i64, index_: *Tensor, src: *Tensor
+        self: *Tensor, dim_: i64, index_: *const Tensor, src: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scatter_(@ptrCast(&c_tensors), self.c_tensor,
@@ -23824,7 +24060,7 @@ pub const Tensor = struct {
     }
 
     pub fn scatterAdd(
-        self: *const Tensor, dim_: i64, index_: *Tensor, src: *Tensor
+        self: *const Tensor, dim_: i64, index_: *const Tensor, src: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scatter_add(@ptrCast(&c_tensors), self.c_tensor,
@@ -23836,7 +24072,7 @@ pub const Tensor = struct {
     }
 
     pub fn scatterAdd_(
-        self: *Tensor, dim_: i64, index_: *Tensor, src: *Tensor
+        self: *Tensor, dim_: i64, index_: *const Tensor, src: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scatter_add_(@ptrCast(&c_tensors), self.c_tensor,
@@ -23848,7 +24084,7 @@ pub const Tensor = struct {
     }
 
     pub fn scatterAddOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, index_: *Tensor, src: *Tensor
+        self: *const Tensor, out: *const Tensor, dim_: i64, index_: *const Tensor, src: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scatter_add_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23861,7 +24097,7 @@ pub const Tensor = struct {
     }
 
     pub fn scatterReduce(
-        self: *const Tensor, dim_: i64, index_: *Tensor, src: *Tensor, reduce: []u8
+        self: *const Tensor, dim_: i64, index_: *const Tensor, src: *const Tensor, reduce: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scatter_reduce(@ptrCast(&c_tensors), self.c_tensor,
@@ -23874,7 +24110,7 @@ pub const Tensor = struct {
     }
 
     pub fn scatterReduce_(
-        self: *Tensor, dim_: i64, index_: *Tensor, src: *Tensor, reduce: []u8
+        self: *Tensor, dim_: i64, index_: *const Tensor, src: *const Tensor, reduce: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scatter_reduce_(@ptrCast(&c_tensors), self.c_tensor,
@@ -23887,7 +24123,7 @@ pub const Tensor = struct {
     }
 
     pub fn scatterReduceOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, index_: *Tensor, src: *Tensor, reduce: []u8
+        self: *const Tensor, out: *const Tensor, dim_: i64, index_: *const Tensor, src: *const Tensor, reduce: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scatter_reduce_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23901,7 +24137,7 @@ pub const Tensor = struct {
     }
 
     pub fn scatterSrcOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, index_: *Tensor, src: *Tensor
+        self: *const Tensor, out: *const Tensor, dim_: i64, index_: *const Tensor, src: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scatter_src_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23914,7 +24150,7 @@ pub const Tensor = struct {
     }
 
     pub fn scatterValue(
-        self: *const Tensor, dim_: i64, index_: *Tensor, value: Scalar
+        self: *const Tensor, dim_: i64, index_: *const Tensor, value: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scatter_value(@ptrCast(&c_tensors), self.c_tensor,
@@ -23926,7 +24162,7 @@ pub const Tensor = struct {
     }
 
     pub fn scatterValue_(
-        self: *Tensor, dim_: i64, index_: *Tensor, value: Scalar
+        self: *Tensor, dim_: i64, index_: *const Tensor, value: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scatter_value_(@ptrCast(&c_tensors), self.c_tensor,
@@ -23938,7 +24174,7 @@ pub const Tensor = struct {
     }
 
     pub fn scatterValueOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, index_: *Tensor, value: Scalar
+        self: *const Tensor, out: *const Tensor, dim_: i64, index_: *const Tensor, value: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scatter_value_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23951,7 +24187,7 @@ pub const Tensor = struct {
     }
 
     pub fn scatterValueReduce(
-        self: *const Tensor, dim_: i64, index_: *Tensor, value: Scalar, reduce: []u8
+        self: *const Tensor, dim_: i64, index_: *const Tensor, value: Scalar, reduce: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scatter_value_reduce(@ptrCast(&c_tensors), self.c_tensor,
@@ -23964,7 +24200,7 @@ pub const Tensor = struct {
     }
 
     pub fn scatterValueReduce_(
-        self: *Tensor, dim_: i64, index_: *Tensor, value: Scalar, reduce: []u8
+        self: *Tensor, dim_: i64, index_: *const Tensor, value: Scalar, reduce: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scatter_value_reduce_(@ptrCast(&c_tensors), self.c_tensor,
@@ -23977,7 +24213,7 @@ pub const Tensor = struct {
     }
 
     pub fn scatterValueReduceOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, index_: *Tensor, value: Scalar, reduce: []u8
+        self: *const Tensor, out: *const Tensor, dim_: i64, index_: *const Tensor, value: Scalar, reduce: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scatter_value_reduce_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23991,7 +24227,7 @@ pub const Tensor = struct {
     }
 
     pub fn searchsorted(
-        self: *const Tensor, sorted_sequence: *Tensor, out_int32: bool, right: bool, side: []u8, sorter: ?*Tensor
+        self: *const Tensor, sorted_sequence: *const Tensor, out_int32: bool, right: bool, side: []const u8, sorter: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_searchsorted(@ptrCast(&c_tensors), sorted_sequence.c_tensor,
@@ -24005,7 +24241,7 @@ pub const Tensor = struct {
     }
 
     pub fn searchsortedScalar(
-        sorted_sequence: *Tensor, self_scalar: Scalar, out_int32: bool, right: bool, side: []u8, sorter: ?*Tensor
+        sorted_sequence: *const Tensor, self_scalar: Scalar, out_int32: bool, right: bool, side: []const u8, sorter: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_searchsorted_scalar(@ptrCast(&c_tensors), sorted_sequence.c_tensor,
@@ -24019,7 +24255,7 @@ pub const Tensor = struct {
     }
 
     pub fn searchsortedScalarOut(
-        out: *Tensor, sorted_sequence: *Tensor, self_scalar: Scalar, out_int32: bool, right: bool, side: []u8, sorter: ?*Tensor
+        out: *const Tensor, sorted_sequence: *const Tensor, self_scalar: Scalar, out_int32: bool, right: bool, side: []const u8, sorter: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_searchsorted_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24034,7 +24270,7 @@ pub const Tensor = struct {
     }
 
     pub fn searchsortedTensorOut(
-        self: *const Tensor, out: *Tensor, sorted_sequence: *Tensor, out_int32: bool, right: bool, side: []u8, sorter: ?*Tensor
+        self: *const Tensor, out: *const Tensor, sorted_sequence: *const Tensor, out_int32: bool, right: bool, side: []const u8, sorter: ?*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_searchsorted_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24049,7 +24285,7 @@ pub const Tensor = struct {
     }
 
     pub fn segmentReduce(
-        data_: *Tensor, reduce: []u8, lengths: ?*Tensor, indices_: ?*Tensor, offsets: ?*Tensor, axis: i64, unsafe: bool, initial: Scalar
+        data_: *const Tensor, reduce: []const u8, lengths: ?*const Tensor, indices_: ?*const Tensor, offsets: ?*const Tensor, axis: i64, unsafe: bool, initial: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_segment_reduce(@ptrCast(&c_tensors), data_.c_tensor,
@@ -24065,7 +24301,7 @@ pub const Tensor = struct {
     }
 
     pub fn segmentReduceOut(
-        out: *Tensor, data_: *Tensor, reduce: []u8, lengths: ?*Tensor, indices_: ?*Tensor, offsets: ?*Tensor, axis: i64, unsafe: bool, initial: Scalar
+        out: *const Tensor, data_: *const Tensor, reduce: []const u8, lengths: ?*const Tensor, indices_: ?*const Tensor, offsets: ?*const Tensor, axis: i64, unsafe: bool, initial: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_segment_reduce_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24093,7 +24329,7 @@ pub const Tensor = struct {
     }
 
     pub fn selectBackward(
-        grad_output: *Tensor, input_sizes: []i64, dim_: i64, index_: i64
+        grad_output: *const Tensor, input_sizes: []i64, dim_: i64, index_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_select_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -24105,7 +24341,7 @@ pub const Tensor = struct {
     }
 
     pub fn selectBackwardOut(
-        out: *Tensor, grad_output: *Tensor, input_sizes: []i64, dim_: i64, index_: i64
+        out: *const Tensor, grad_output: *const Tensor, input_sizes: []i64, dim_: i64, index_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_select_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24129,7 +24365,7 @@ pub const Tensor = struct {
     }
 
     pub fn selectCopyIntOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, index_: i64
+        self: *const Tensor, out: *const Tensor, dim_: i64, index_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_select_copy_int_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24141,7 +24377,7 @@ pub const Tensor = struct {
     }
 
     pub fn selectScatter(
-        self: *const Tensor, src: *Tensor, dim_: i64, index_: i64
+        self: *const Tensor, src: *const Tensor, dim_: i64, index_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_select_scatter(@ptrCast(&c_tensors), self.c_tensor,
@@ -24153,7 +24389,7 @@ pub const Tensor = struct {
     }
 
     pub fn selectScatterOut(
-        self: *const Tensor, out: *Tensor, src: *Tensor, dim_: i64, index_: i64
+        self: *const Tensor, out: *const Tensor, src: *const Tensor, dim_: i64, index_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_select_scatter_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24202,7 +24438,7 @@ pub const Tensor = struct {
     }
 
     pub fn setData(
-        self: *Tensor, new_data: *Tensor
+        self: *Tensor, new_data: *const Tensor
     ) void {
         __c.atg_set_data(self.c_tensor,
                 new_data.c_tensor);
@@ -24211,7 +24447,7 @@ pub const Tensor = struct {
     }
 
     pub fn setOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_set_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24231,7 +24467,7 @@ pub const Tensor = struct {
     }
 
     pub fn setSourceTensor(
-        self: *const Tensor, source: *Tensor
+        self: *const Tensor, source: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_set_source_tensor(@ptrCast(&c_tensors), self.c_tensor,
@@ -24241,7 +24477,7 @@ pub const Tensor = struct {
     }
 
     pub fn setSourceTensor_(
-        self: *Tensor, source: *Tensor
+        self: *Tensor, source: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_set_source_tensor_(@ptrCast(&c_tensors), self.c_tensor,
@@ -24251,7 +24487,7 @@ pub const Tensor = struct {
     }
 
     pub fn setSourceTensorOut(
-        self: *const Tensor, out: *Tensor, source: *Tensor
+        self: *const Tensor, out: *const Tensor, source: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_set_source_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24262,7 +24498,7 @@ pub const Tensor = struct {
     }
 
     pub fn setSourceTensorStorageOffset_(
-        self: *Tensor, source: *Tensor, storage_offset: i64, size_: []i64, stride_: []i64
+        self: *Tensor, source: *const Tensor, storage_offset: i64, size_: []i64, stride_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_set_source_tensor_storage_offset_(@ptrCast(&c_tensors), self.c_tensor,
@@ -24293,7 +24529,7 @@ pub const Tensor = struct {
     }
 
     pub fn sgnOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sgn_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24321,7 +24557,7 @@ pub const Tensor = struct {
     }
 
     pub fn sigmoidBackward(
-        grad_output: *Tensor, output: *Tensor
+        grad_output: *const Tensor, output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sigmoid_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -24331,7 +24567,7 @@ pub const Tensor = struct {
     }
 
     pub fn sigmoidBackwardGradInput(
-        grad_input: *Tensor, grad_output: *Tensor, output: *Tensor
+        grad_input: *const Tensor, grad_output: *const Tensor, output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sigmoid_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -24342,7 +24578,7 @@ pub const Tensor = struct {
     }
 
     pub fn sigmoidOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sigmoid_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24370,7 +24606,7 @@ pub const Tensor = struct {
     }
 
     pub fn signOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sign_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24389,7 +24625,7 @@ pub const Tensor = struct {
     }
 
     pub fn signbitOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_signbit_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24417,7 +24653,7 @@ pub const Tensor = struct {
     }
 
     pub fn siluBackward(
-        self: *const Tensor, grad_output: *Tensor
+        self: *const Tensor, grad_output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_silu_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -24427,7 +24663,7 @@ pub const Tensor = struct {
     }
 
     pub fn siluBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_silu_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -24438,7 +24674,7 @@ pub const Tensor = struct {
     }
 
     pub fn siluOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_silu_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24466,7 +24702,7 @@ pub const Tensor = struct {
     }
 
     pub fn sinOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sin_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24494,7 +24730,7 @@ pub const Tensor = struct {
     }
 
     pub fn sincOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sinc_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24522,7 +24758,7 @@ pub const Tensor = struct {
     }
 
     pub fn sinhOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sinh_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24545,7 +24781,7 @@ pub const Tensor = struct {
     }
 
     pub fn sliceBackward(
-        grad_output: *Tensor, input_sizes: []i64, dim_: i64, start: i64, end: i64, step: i64
+        grad_output: *const Tensor, input_sizes: []i64, dim_: i64, start: i64, end: i64, step: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slice_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -24559,7 +24795,7 @@ pub const Tensor = struct {
     }
 
     pub fn sliceBackwardOut(
-        out: *Tensor, grad_output: *Tensor, input_sizes: []i64, dim_: i64, start: i64, end: i64, step: i64
+        out: *const Tensor, grad_output: *const Tensor, input_sizes: []i64, dim_: i64, start: i64, end: i64, step: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slice_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24587,7 +24823,7 @@ pub const Tensor = struct {
     }
 
     pub fn sliceCopyTensorOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, start: ?i64, end: ?i64, step: i64
+        self: *const Tensor, out: *const Tensor, dim_: i64, start: ?i64, end: ?i64, step: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slice_copy_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24601,7 +24837,7 @@ pub const Tensor = struct {
     }
 
     pub fn sliceInverse(
-        self: *const Tensor, src: *Tensor, dim_: i64, start: ?i64, end: ?i64, step: i64
+        self: *const Tensor, src: *const Tensor, dim_: i64, start: ?i64, end: ?i64, step: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slice_inverse(@ptrCast(&c_tensors), self.c_tensor,
@@ -24615,7 +24851,7 @@ pub const Tensor = struct {
     }
 
     pub fn sliceScatter(
-        self: *const Tensor, src: *Tensor, dim_: i64, start: ?i64, end: ?i64, step: i64
+        self: *const Tensor, src: *const Tensor, dim_: i64, start: ?i64, end: ?i64, step: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slice_scatter(@ptrCast(&c_tensors), self.c_tensor,
@@ -24629,7 +24865,7 @@ pub const Tensor = struct {
     }
 
     pub fn sliceScatterOut(
-        self: *const Tensor, out: *Tensor, src: *Tensor, dim_: i64, start: ?i64, end: ?i64, step: i64
+        self: *const Tensor, out: *const Tensor, src: *const Tensor, dim_: i64, start: ?i64, end: ?i64, step: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slice_scatter_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24653,7 +24889,7 @@ pub const Tensor = struct {
     }
 
     pub fn slogdetOut(
-        self: *const Tensor, sign_: *Tensor, logabsdet: *Tensor
+        self: *const Tensor, sign_: *const Tensor, logabsdet: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_slogdet_out(@ptrCast(&c_tensors), sign_.c_tensor,
@@ -24664,7 +24900,7 @@ pub const Tensor = struct {
     }
 
     pub fn slowConv3d(
-        self: *const Tensor, weight: *Tensor, kernel_size: []i64, bias: ?*Tensor, stride_: []i64, padding: []i64
+        self: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv3d(@ptrCast(&c_tensors), self.c_tensor,
@@ -24678,7 +24914,7 @@ pub const Tensor = struct {
     }
 
     pub fn slowConv3dOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, kernel_size: []i64, bias: ?*Tensor, stride_: []i64, padding: []i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv3d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24693,7 +24929,7 @@ pub const Tensor = struct {
     }
 
     pub fn slowConvDilated2d(
-        self: *const Tensor, weight: *Tensor, kernel_size: []i64, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64
+        self: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv_dilated2d(@ptrCast(&c_tensors), self.c_tensor,
@@ -24708,7 +24944,7 @@ pub const Tensor = struct {
     }
 
     pub fn slowConvDilated2dOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, kernel_size: []i64, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv_dilated2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24724,7 +24960,7 @@ pub const Tensor = struct {
     }
 
     pub fn slowConvDilated3d(
-        self: *const Tensor, weight: *Tensor, kernel_size: []i64, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64
+        self: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv_dilated3d(@ptrCast(&c_tensors), self.c_tensor,
@@ -24739,7 +24975,7 @@ pub const Tensor = struct {
     }
 
     pub fn slowConvDilated3dOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, kernel_size: []i64, bias: ?*Tensor, stride_: []i64, padding: []i64, dilation: []i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv_dilated3d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24755,7 +24991,7 @@ pub const Tensor = struct {
     }
 
     pub fn slowConvTranspose2d(
-        self: *const Tensor, weight: *Tensor, kernel_size: []i64, bias: ?*Tensor, stride_: []i64, padding: []i64, output_padding: []i64, dilation: []i64
+        self: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, output_padding: []i64, dilation: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv_transpose2d(@ptrCast(&c_tensors), self.c_tensor,
@@ -24771,7 +25007,7 @@ pub const Tensor = struct {
     }
 
     pub fn slowConvTranspose2dOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, kernel_size: []i64, bias: ?*Tensor, stride_: []i64, padding: []i64, output_padding: []i64, dilation: []i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, output_padding: []i64, dilation: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv_transpose2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24788,7 +25024,7 @@ pub const Tensor = struct {
     }
 
     pub fn slowConvTranspose3d(
-        self: *const Tensor, weight: *Tensor, kernel_size: []i64, bias: ?*Tensor, stride_: []i64, padding: []i64, output_padding: []i64, dilation: []i64
+        self: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, output_padding: []i64, dilation: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv_transpose3d(@ptrCast(&c_tensors), self.c_tensor,
@@ -24804,7 +25040,7 @@ pub const Tensor = struct {
     }
 
     pub fn slowConvTranspose3dOut(
-        self: *const Tensor, out: *Tensor, weight: *Tensor, kernel_size: []i64, bias: ?*Tensor, stride_: []i64, padding: []i64, output_padding: []i64, dilation: []i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, output_padding: []i64, dilation: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv_transpose3d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24821,7 +25057,7 @@ pub const Tensor = struct {
     }
 
     pub fn smm(
-        self: *const Tensor, mat2: *Tensor
+        self: *const Tensor, mat2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_smm(@ptrCast(&c_tensors), self.c_tensor,
@@ -24831,7 +25067,7 @@ pub const Tensor = struct {
     }
 
     pub fn smoothL1Loss(
-        self: *const Tensor, target: *Tensor, reduction: i64, beta: f64
+        self: *const Tensor, target: *const Tensor, reduction: i64, beta: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_smooth_l1_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -24843,7 +25079,7 @@ pub const Tensor = struct {
     }
 
     pub fn smoothL1LossBackward(
-        self: *const Tensor, grad_output: *Tensor, target: *Tensor, reduction: i64, beta: f64
+        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64, beta: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_smooth_l1_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -24856,7 +25092,7 @@ pub const Tensor = struct {
     }
 
     pub fn smoothL1LossBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, target: *Tensor, reduction: i64, beta: f64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64, beta: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_smooth_l1_loss_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -24870,7 +25106,7 @@ pub const Tensor = struct {
     }
 
     pub fn smoothL1LossOut(
-        self: *const Tensor, out: *Tensor, target: *Tensor, reduction: i64, beta: f64
+        self: *const Tensor, out: *const Tensor, target: *const Tensor, reduction: i64, beta: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_smooth_l1_loss_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24883,7 +25119,7 @@ pub const Tensor = struct {
     }
 
     pub fn softMarginLoss(
-        self: *const Tensor, target: *Tensor, reduction: i64
+        self: *const Tensor, target: *const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_soft_margin_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -24894,7 +25130,7 @@ pub const Tensor = struct {
     }
 
     pub fn softMarginLossBackward(
-        self: *const Tensor, grad_output: *Tensor, target: *Tensor, reduction: i64
+        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_soft_margin_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -24906,7 +25142,7 @@ pub const Tensor = struct {
     }
 
     pub fn softMarginLossBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, target: *Tensor, reduction: i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_soft_margin_loss_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -24919,7 +25155,7 @@ pub const Tensor = struct {
     }
 
     pub fn softMarginLossOut(
-        self: *const Tensor, out: *Tensor, target: *Tensor, reduction: i64
+        self: *const Tensor, out: *const Tensor, target: *const Tensor, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_soft_margin_loss_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24942,7 +25178,7 @@ pub const Tensor = struct {
     }
 
     pub fn softmaxIntOut(
-        self: *const Tensor, out: *Tensor, dim_: i64, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, dim_: i64, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_softmax_int_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -24963,7 +25199,7 @@ pub const Tensor = struct {
     }
 
     pub fn softplusBackward(
-        self: *const Tensor, grad_output: *Tensor, beta: Scalar, threshold_: Scalar
+        self: *const Tensor, grad_output: *const Tensor, beta: Scalar, threshold_: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_softplus_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -24975,7 +25211,7 @@ pub const Tensor = struct {
     }
 
     pub fn softplusBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, beta: Scalar, threshold_: Scalar
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, beta: Scalar, threshold_: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_softplus_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -24988,7 +25224,7 @@ pub const Tensor = struct {
     }
 
     pub fn softplusOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_softplus_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25007,7 +25243,7 @@ pub const Tensor = struct {
     }
 
     pub fn softshrinkBackward(
-        self: *const Tensor, grad_output: *Tensor, lambd: Scalar
+        self: *const Tensor, grad_output: *const Tensor, lambd: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_softshrink_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -25018,7 +25254,7 @@ pub const Tensor = struct {
     }
 
     pub fn softshrinkBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, lambd: Scalar
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, lambd: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_softshrink_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -25030,7 +25266,7 @@ pub const Tensor = struct {
     }
 
     pub fn softshrinkOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_softshrink_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25063,7 +25299,7 @@ pub const Tensor = struct {
     }
 
     pub fn sortValues(
-        self: *const Tensor, values_: *Tensor, indices_: *Tensor, dim_: i64, descending: bool
+        self: *const Tensor, values_: *const Tensor, indices_: *const Tensor, dim_: i64, descending: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_sort_values(@ptrCast(&c_tensors), values_.c_tensor,
@@ -25076,7 +25312,7 @@ pub const Tensor = struct {
     }
 
     pub fn sortValuesStable(
-        self: *const Tensor, values_: *Tensor, indices_: *Tensor, stable: bool, dim_: i64, descending: bool
+        self: *const Tensor, values_: *const Tensor, indices_: *const Tensor, stable: bool, dim_: i64, descending: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_sort_values_stable(@ptrCast(&c_tensors), values_.c_tensor,
@@ -25090,117 +25326,117 @@ pub const Tensor = struct {
     }
 
     pub fn sparseBscTensor(
-        ccol_indices_: *Tensor, row_indices_: *Tensor, values_: *Tensor, options: TensorOptions
+        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_bsc_tensor(@ptrCast(&c_tensors), ccol_indices_.c_tensor,
                 row_indices_.c_tensor,
                 values_.c_tensor,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn sparseBscTensorCcolRowValueSize(
-        ccol_indices_: *Tensor, row_indices_: *Tensor, values_: *Tensor, size_: []i64, options: TensorOptions
+        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_bsc_tensor_ccol_row_value_size(@ptrCast(&c_tensors), ccol_indices_.c_tensor,
                 row_indices_.c_tensor,
                 values_.c_tensor,
                 size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn sparseBsrTensor(
-        crow_indices_: *Tensor, col_indices_: *Tensor, values_: *Tensor, options: TensorOptions
+        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_bsr_tensor(@ptrCast(&c_tensors), crow_indices_.c_tensor,
                 col_indices_.c_tensor,
                 values_.c_tensor,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn sparseBsrTensorCrowColValueSize(
-        crow_indices_: *Tensor, col_indices_: *Tensor, values_: *Tensor, size_: []i64, options: TensorOptions
+        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_bsr_tensor_crow_col_value_size(@ptrCast(&c_tensors), crow_indices_.c_tensor,
                 col_indices_.c_tensor,
                 values_.c_tensor,
                 size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn sparseCompressedTensor(
-        compressed_indices: *Tensor, plain_indices: *Tensor, values_: *Tensor, options: TensorOptions
+        compressed_indices: *const Tensor, plain_indices: *const Tensor, values_: *const Tensor, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_compressed_tensor(@ptrCast(&c_tensors), compressed_indices.c_tensor,
                 plain_indices.c_tensor,
                 values_.c_tensor,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn sparseCompressedTensorCompPlainValueSize(
-        compressed_indices: *Tensor, plain_indices: *Tensor, values_: *Tensor, size_: []i64, options: TensorOptions
+        compressed_indices: *const Tensor, plain_indices: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_compressed_tensor_comp_plain_value_size(@ptrCast(&c_tensors), compressed_indices.c_tensor,
                 plain_indices.c_tensor,
                 values_.c_tensor,
                 size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn sparseCooTensor(
-        size_: []i64, options: TensorOptions
+        size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_coo_tensor(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn sparseCooTensorIndices(
-        indices_: *Tensor, values_: *Tensor, options: TensorOptions, is_coalesced_: bool
+        indices_: *const Tensor, values_: *const Tensor, options_: TensorOptions, is_coalesced_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_coo_tensor_indices(@ptrCast(&c_tensors), indices_.c_tensor,
                 values_.c_tensor,
-                options.kind.cInt(), options.device.cInt(),
+                options_.kind.cInt(), options_.device.cInt(),
                 if (is_coalesced_)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn sparseCooTensorIndicesSize(
-        indices_: *Tensor, values_: *Tensor, size_: []i64, options: TensorOptions, is_coalesced_: bool
+        indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions, is_coalesced_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_coo_tensor_indices_size(@ptrCast(&c_tensors), indices_.c_tensor,
                 values_.c_tensor,
                 size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt(),
+                options_.kind.cInt(), options_.device.cInt(),
                 if (is_coalesced_)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn sparseCooTensorSizeOut(
-        out: *Tensor, size_: []i64
+        out: *const Tensor, size_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_coo_tensor_size_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25210,51 +25446,51 @@ pub const Tensor = struct {
     }
 
     pub fn sparseCscTensor(
-        ccol_indices_: *Tensor, row_indices_: *Tensor, values_: *Tensor, options: TensorOptions
+        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_csc_tensor(@ptrCast(&c_tensors), ccol_indices_.c_tensor,
                 row_indices_.c_tensor,
                 values_.c_tensor,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn sparseCscTensorCcolRowValueSize(
-        ccol_indices_: *Tensor, row_indices_: *Tensor, values_: *Tensor, size_: []i64, options: TensorOptions
+        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_csc_tensor_ccol_row_value_size(@ptrCast(&c_tensors), ccol_indices_.c_tensor,
                 row_indices_.c_tensor,
                 values_.c_tensor,
                 size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn sparseCsrTensor(
-        crow_indices_: *Tensor, col_indices_: *Tensor, values_: *Tensor, options: TensorOptions
+        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_csr_tensor(@ptrCast(&c_tensors), crow_indices_.c_tensor,
                 col_indices_.c_tensor,
                 values_.c_tensor,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn sparseCsrTensorCrowColValueSize(
-        crow_indices_: *Tensor, col_indices_: *Tensor, values_: *Tensor, size_: []i64, options: TensorOptions
+        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_csr_tensor_crow_col_value_size(@ptrCast(&c_tensors), crow_indices_.c_tensor,
                 col_indices_.c_tensor,
                 values_.c_tensor,
                 size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25268,7 +25504,7 @@ pub const Tensor = struct {
     }
 
     pub fn sparseMask(
-        self: *const Tensor, mask: *Tensor
+        self: *const Tensor, mask: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_mask(@ptrCast(&c_tensors), self.c_tensor,
@@ -25278,7 +25514,7 @@ pub const Tensor = struct {
     }
 
     pub fn sparseMaskOut(
-        self: *const Tensor, out: *Tensor, mask: *Tensor
+        self: *const Tensor, out: *const Tensor, mask: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_mask_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25337,7 +25573,7 @@ pub const Tensor = struct {
     }
 
     pub fn sparseResizeAndClearOut(
-        self: *const Tensor, out: *Tensor, size_: []i64, sparse_dim_: i64, dense_dim_: i64
+        self: *const Tensor, out: *const Tensor, size_: []i64, sparse_dim_: i64, dense_dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_resize_and_clear_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25350,7 +25586,7 @@ pub const Tensor = struct {
     }
 
     pub fn sparseResizeOut(
-        self: *const Tensor, out: *Tensor, size_: []i64, sparse_dim_: i64, dense_dim_: i64
+        self: *const Tensor, out: *const Tensor, size_: []i64, sparse_dim_: i64, dense_dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_resize_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25363,7 +25599,7 @@ pub const Tensor = struct {
     }
 
     pub fn sparseSampledAddmm(
-        self: *const Tensor, mat1: *Tensor, mat2: *Tensor
+        self: *const Tensor, mat1: *const Tensor, mat2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_sampled_addmm(@ptrCast(&c_tensors), self.c_tensor,
@@ -25374,7 +25610,7 @@ pub const Tensor = struct {
     }
 
     pub fn sparseSampledAddmmOut(
-        self: *const Tensor, out: *Tensor, mat1: *Tensor, mat2: *Tensor
+        self: *const Tensor, out: *const Tensor, mat1: *const Tensor, mat2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_sampled_addmm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25386,7 +25622,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialAiryAi(
-        x: *Tensor
+        x: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_airy_ai(@ptrCast(&c_tensors), x.c_tensor);
@@ -25395,7 +25631,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialAiryAiOut(
-        out: *Tensor, x: *Tensor
+        out: *const Tensor, x: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_airy_ai_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25414,7 +25650,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialBesselJ0Out(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_bessel_j0_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25433,7 +25669,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialBesselJ1Out(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_bessel_j1_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25452,7 +25688,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialBesselY0Out(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_bessel_y0_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25471,7 +25707,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialBesselY1Out(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_bessel_y1_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25481,7 +25717,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialT(
-        x: *Tensor, n: *Tensor
+        x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_t(@ptrCast(&c_tensors), x.c_tensor,
@@ -25491,7 +25727,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialTNScalar(
-        x: *Tensor, n: Scalar
+        x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_t_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
@@ -25501,7 +25737,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialTNScalarOut(
-        out: *Tensor, x: *Tensor, n: Scalar
+        out: *const Tensor, x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_t_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25512,7 +25748,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialTOut(
-        out: *Tensor, x: *Tensor, n: *Tensor
+        out: *const Tensor, x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_t_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25523,7 +25759,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialTXScalar(
-        x: Scalar, n: *Tensor
+        x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_t_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
@@ -25533,7 +25769,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialTXScalarOut(
-        out: *Tensor, x: Scalar, n: *Tensor
+        out: *const Tensor, x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_t_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25544,7 +25780,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialU(
-        x: *Tensor, n: *Tensor
+        x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_u(@ptrCast(&c_tensors), x.c_tensor,
@@ -25554,7 +25790,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialUNScalar(
-        x: *Tensor, n: Scalar
+        x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_u_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
@@ -25564,7 +25800,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialUNScalarOut(
-        out: *Tensor, x: *Tensor, n: Scalar
+        out: *const Tensor, x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_u_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25575,7 +25811,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialUOut(
-        out: *Tensor, x: *Tensor, n: *Tensor
+        out: *const Tensor, x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_u_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25586,7 +25822,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialUXScalar(
-        x: Scalar, n: *Tensor
+        x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_u_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
@@ -25596,7 +25832,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialUXScalarOut(
-        out: *Tensor, x: Scalar, n: *Tensor
+        out: *const Tensor, x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_u_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25607,7 +25843,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialV(
-        x: *Tensor, n: *Tensor
+        x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_v(@ptrCast(&c_tensors), x.c_tensor,
@@ -25617,7 +25853,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialVNScalar(
-        x: *Tensor, n: Scalar
+        x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_v_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
@@ -25627,7 +25863,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialVNScalarOut(
-        out: *Tensor, x: *Tensor, n: Scalar
+        out: *const Tensor, x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_v_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25638,7 +25874,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialVOut(
-        out: *Tensor, x: *Tensor, n: *Tensor
+        out: *const Tensor, x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_v_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25649,7 +25885,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialVXScalar(
-        x: Scalar, n: *Tensor
+        x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_v_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
@@ -25659,7 +25895,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialVXScalarOut(
-        out: *Tensor, x: Scalar, n: *Tensor
+        out: *const Tensor, x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_v_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25670,7 +25906,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialW(
-        x: *Tensor, n: *Tensor
+        x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_w(@ptrCast(&c_tensors), x.c_tensor,
@@ -25680,7 +25916,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialWNScalar(
-        x: *Tensor, n: Scalar
+        x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_w_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
@@ -25690,7 +25926,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialWNScalarOut(
-        out: *Tensor, x: *Tensor, n: Scalar
+        out: *const Tensor, x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_w_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25701,7 +25937,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialWOut(
-        out: *Tensor, x: *Tensor, n: *Tensor
+        out: *const Tensor, x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_w_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25712,7 +25948,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialWXScalar(
-        x: Scalar, n: *Tensor
+        x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_w_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
@@ -25722,7 +25958,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialChebyshevPolynomialWXScalarOut(
-        out: *Tensor, x: Scalar, n: *Tensor
+        out: *const Tensor, x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_w_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25742,7 +25978,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialDigammaOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_digamma_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25761,7 +25997,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialEntrOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_entr_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25780,7 +26016,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialErfOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_erf_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25799,7 +26035,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialErfcOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_erfc_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25818,7 +26054,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialErfcxOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_erfcx_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25837,7 +26073,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialErfinvOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_erfinv_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25856,7 +26092,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialExp2Out(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_exp2_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25875,7 +26111,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialExpitOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_expit_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25894,7 +26130,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialExpm1Out(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_expm1_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25904,7 +26140,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialGammainc(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_gammainc(@ptrCast(&c_tensors), self.c_tensor,
@@ -25914,7 +26150,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialGammaincOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_gammainc_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25925,7 +26161,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialGammaincc(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_gammaincc(@ptrCast(&c_tensors), self.c_tensor,
@@ -25935,7 +26171,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialGammainccOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_gammaincc_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25955,7 +26191,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialGammalnOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_gammaln_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25965,7 +26201,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialHermitePolynomialH(
-        x: *Tensor, n: *Tensor
+        x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_hermite_polynomial_h(@ptrCast(&c_tensors), x.c_tensor,
@@ -25975,7 +26211,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialHermitePolynomialHNScalar(
-        x: *Tensor, n: Scalar
+        x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_hermite_polynomial_h_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
@@ -25985,7 +26221,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialHermitePolynomialHNScalarOut(
-        out: *Tensor, x: *Tensor, n: Scalar
+        out: *const Tensor, x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_hermite_polynomial_h_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -25996,7 +26232,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialHermitePolynomialHOut(
-        out: *Tensor, x: *Tensor, n: *Tensor
+        out: *const Tensor, x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_hermite_polynomial_h_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26007,7 +26243,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialHermitePolynomialHXScalar(
-        x: Scalar, n: *Tensor
+        x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_hermite_polynomial_h_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
@@ -26017,7 +26253,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialHermitePolynomialHXScalarOut(
-        out: *Tensor, x: Scalar, n: *Tensor
+        out: *const Tensor, x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_hermite_polynomial_h_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26028,7 +26264,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialHermitePolynomialHe(
-        x: *Tensor, n: *Tensor
+        x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_hermite_polynomial_he(@ptrCast(&c_tensors), x.c_tensor,
@@ -26038,7 +26274,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialHermitePolynomialHeNScalar(
-        x: *Tensor, n: Scalar
+        x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_hermite_polynomial_he_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
@@ -26048,7 +26284,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialHermitePolynomialHeNScalarOut(
-        out: *Tensor, x: *Tensor, n: Scalar
+        out: *const Tensor, x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_hermite_polynomial_he_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26059,7 +26295,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialHermitePolynomialHeOut(
-        out: *Tensor, x: *Tensor, n: *Tensor
+        out: *const Tensor, x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_hermite_polynomial_he_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26070,7 +26306,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialHermitePolynomialHeXScalar(
-        x: Scalar, n: *Tensor
+        x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_hermite_polynomial_he_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
@@ -26080,7 +26316,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialHermitePolynomialHeXScalarOut(
-        out: *Tensor, x: Scalar, n: *Tensor
+        out: *const Tensor, x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_hermite_polynomial_he_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26100,7 +26336,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialI0Out(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_i0_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26119,7 +26355,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialI0eOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_i0e_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26138,7 +26374,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialI1Out(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_i1_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26157,7 +26393,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialI1eOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_i1e_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26167,7 +26403,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialLaguerrePolynomialL(
-        x: *Tensor, n: *Tensor
+        x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_laguerre_polynomial_l(@ptrCast(&c_tensors), x.c_tensor,
@@ -26177,7 +26413,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialLaguerrePolynomialLNScalar(
-        x: *Tensor, n: Scalar
+        x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_laguerre_polynomial_l_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
@@ -26187,7 +26423,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialLaguerrePolynomialLNScalarOut(
-        out: *Tensor, x: *Tensor, n: Scalar
+        out: *const Tensor, x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_laguerre_polynomial_l_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26198,7 +26434,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialLaguerrePolynomialLOut(
-        out: *Tensor, x: *Tensor, n: *Tensor
+        out: *const Tensor, x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_laguerre_polynomial_l_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26209,7 +26445,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialLaguerrePolynomialLXScalar(
-        x: Scalar, n: *Tensor
+        x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_laguerre_polynomial_l_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
@@ -26219,7 +26455,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialLaguerrePolynomialLXScalarOut(
-        out: *Tensor, x: Scalar, n: *Tensor
+        out: *const Tensor, x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_laguerre_polynomial_l_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26230,7 +26466,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialLegendrePolynomialP(
-        x: *Tensor, n: *Tensor
+        x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_legendre_polynomial_p(@ptrCast(&c_tensors), x.c_tensor,
@@ -26240,7 +26476,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialLegendrePolynomialPNScalar(
-        x: *Tensor, n: Scalar
+        x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_legendre_polynomial_p_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
@@ -26250,7 +26486,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialLegendrePolynomialPNScalarOut(
-        out: *Tensor, x: *Tensor, n: Scalar
+        out: *const Tensor, x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_legendre_polynomial_p_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26261,7 +26497,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialLegendrePolynomialPOut(
-        out: *Tensor, x: *Tensor, n: *Tensor
+        out: *const Tensor, x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_legendre_polynomial_p_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26272,7 +26508,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialLegendrePolynomialPXScalar(
-        x: Scalar, n: *Tensor
+        x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_legendre_polynomial_p_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
@@ -26282,7 +26518,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialLegendrePolynomialPXScalarOut(
-        out: *Tensor, x: Scalar, n: *Tensor
+        out: *const Tensor, x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_legendre_polynomial_p_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26302,7 +26538,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialLog1pOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_log1p_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26321,7 +26557,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialLogNdtrOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_log_ndtr_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26352,7 +26588,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialLogitOut(
-        self: *const Tensor, out: *Tensor, eps: ?f64
+        self: *const Tensor, out: *const Tensor, eps: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_logit_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26374,7 +26610,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialLogsumexpOut(
-        self: *const Tensor, out: *Tensor, dim_: []i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: []i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_logsumexp_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26395,7 +26631,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialModifiedBesselI0Out(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_modified_bessel_i0_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26414,7 +26650,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialModifiedBesselI1Out(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_modified_bessel_i1_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26433,7 +26669,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialModifiedBesselK0Out(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_modified_bessel_k0_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26452,7 +26688,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialModifiedBesselK1Out(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_modified_bessel_k1_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26472,7 +26708,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialMultigammalnOut(
-        self: *const Tensor, out: *Tensor, p: i64
+        self: *const Tensor, out: *const Tensor, p: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_multigammaln_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26492,7 +26728,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialNdtrOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_ndtr_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26511,7 +26747,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialNdtriOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_ndtri_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26531,7 +26767,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialPolygammaOut(
-        self: *const Tensor, out: *Tensor, n: i64
+        self: *const Tensor, out: *const Tensor, n: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_polygamma_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26551,7 +26787,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialPsiOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_psi_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26571,7 +26807,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialRoundOut(
-        self: *const Tensor, out: *Tensor, decimals: i64
+        self: *const Tensor, out: *const Tensor, decimals: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_round_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26582,7 +26818,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialScaledModifiedBesselK0(
-        x: *Tensor
+        x: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_scaled_modified_bessel_k0(@ptrCast(&c_tensors), x.c_tensor);
@@ -26591,7 +26827,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialScaledModifiedBesselK0Out(
-        out: *Tensor, x: *Tensor
+        out: *const Tensor, x: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_scaled_modified_bessel_k0_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26601,7 +26837,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialScaledModifiedBesselK1(
-        x: *Tensor
+        x: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_scaled_modified_bessel_k1(@ptrCast(&c_tensors), x.c_tensor);
@@ -26610,7 +26846,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialScaledModifiedBesselK1Out(
-        out: *Tensor, x: *Tensor
+        out: *const Tensor, x: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_scaled_modified_bessel_k1_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26620,7 +26856,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialT(
-        x: *Tensor, n: *Tensor
+        x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_t(@ptrCast(&c_tensors), x.c_tensor,
@@ -26630,7 +26866,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialTNScalar(
-        x: *Tensor, n: Scalar
+        x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_t_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
@@ -26640,7 +26876,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialTNScalarOut(
-        out: *Tensor, x: *Tensor, n: Scalar
+        out: *const Tensor, x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_t_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26651,7 +26887,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialTOut(
-        out: *Tensor, x: *Tensor, n: *Tensor
+        out: *const Tensor, x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_t_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26662,7 +26898,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialTXScalar(
-        x: Scalar, n: *Tensor
+        x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_t_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
@@ -26672,7 +26908,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialTXScalarOut(
-        out: *Tensor, x: Scalar, n: *Tensor
+        out: *const Tensor, x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_t_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26683,7 +26919,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialU(
-        x: *Tensor, n: *Tensor
+        x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_u(@ptrCast(&c_tensors), x.c_tensor,
@@ -26693,7 +26929,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialUNScalar(
-        x: *Tensor, n: Scalar
+        x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_u_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
@@ -26703,7 +26939,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialUNScalarOut(
-        out: *Tensor, x: *Tensor, n: Scalar
+        out: *const Tensor, x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_u_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26714,7 +26950,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialUOut(
-        out: *Tensor, x: *Tensor, n: *Tensor
+        out: *const Tensor, x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_u_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26725,7 +26961,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialUXScalar(
-        x: Scalar, n: *Tensor
+        x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_u_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
@@ -26735,7 +26971,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialUXScalarOut(
-        out: *Tensor, x: Scalar, n: *Tensor
+        out: *const Tensor, x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_u_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26746,7 +26982,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialV(
-        x: *Tensor, n: *Tensor
+        x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_v(@ptrCast(&c_tensors), x.c_tensor,
@@ -26756,7 +26992,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialVNScalar(
-        x: *Tensor, n: Scalar
+        x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_v_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
@@ -26766,7 +27002,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialVNScalarOut(
-        out: *Tensor, x: *Tensor, n: Scalar
+        out: *const Tensor, x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_v_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26777,7 +27013,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialVOut(
-        out: *Tensor, x: *Tensor, n: *Tensor
+        out: *const Tensor, x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_v_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26788,7 +27024,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialVXScalar(
-        x: Scalar, n: *Tensor
+        x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_v_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
@@ -26798,7 +27034,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialVXScalarOut(
-        out: *Tensor, x: Scalar, n: *Tensor
+        out: *const Tensor, x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_v_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26809,7 +27045,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialW(
-        x: *Tensor, n: *Tensor
+        x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_w(@ptrCast(&c_tensors), x.c_tensor,
@@ -26819,7 +27055,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialWNScalar(
-        x: *Tensor, n: Scalar
+        x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_w_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
@@ -26829,7 +27065,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialWNScalarOut(
-        out: *Tensor, x: *Tensor, n: Scalar
+        out: *const Tensor, x: *const Tensor, n: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_w_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26840,7 +27076,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialWOut(
-        out: *Tensor, x: *Tensor, n: *Tensor
+        out: *const Tensor, x: *const Tensor, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_w_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26851,7 +27087,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialWXScalar(
-        x: Scalar, n: *Tensor
+        x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_w_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
@@ -26861,7 +27097,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialShiftedChebyshevPolynomialWXScalarOut(
-        out: *Tensor, x: Scalar, n: *Tensor
+        out: *const Tensor, x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_w_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26881,7 +27117,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialSincOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_sinc_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26902,7 +27138,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialSphericalBesselJ0(
-        x: *Tensor
+        x: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_spherical_bessel_j0(@ptrCast(&c_tensors), x.c_tensor);
@@ -26911,7 +27147,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialSphericalBesselJ0Out(
-        out: *Tensor, x: *Tensor
+        out: *const Tensor, x: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_spherical_bessel_j0_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26921,7 +27157,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialXlog1py(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_xlog1py(@ptrCast(&c_tensors), self.c_tensor,
@@ -26941,7 +27177,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialXlog1pyOtherScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_xlog1py_other_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26952,7 +27188,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialXlog1pyOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_xlog1py_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26963,7 +27199,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialXlog1pySelfScalar(
-        self_scalar: Scalar, other: *Tensor
+        self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_xlog1py_self_scalar(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
@@ -26973,7 +27209,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialXlog1pySelfScalarOut(
-        out: *Tensor, self_scalar: Scalar, other: *Tensor
+        out: *const Tensor, self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_xlog1py_self_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -26984,7 +27220,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialXlogy(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_xlogy(@ptrCast(&c_tensors), self.c_tensor,
@@ -27004,7 +27240,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialXlogyOtherScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_xlogy_other_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27015,7 +27251,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialXlogyOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_xlogy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27026,7 +27262,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialXlogySelfScalar(
-        self_scalar: Scalar, other: *Tensor
+        self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_xlogy_self_scalar(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
@@ -27036,7 +27272,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialXlogySelfScalarOut(
-        out: *Tensor, self_scalar: Scalar, other: *Tensor
+        out: *const Tensor, self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_xlogy_self_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27047,7 +27283,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialZeta(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_zeta(@ptrCast(&c_tensors), self.c_tensor,
@@ -27067,7 +27303,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialZetaOtherScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_zeta_other_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27078,7 +27314,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialZetaOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_zeta_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27089,7 +27325,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialZetaSelfScalar(
-        self_scalar: Scalar, other: *Tensor
+        self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_zeta_self_scalar(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
@@ -27099,7 +27335,7 @@ pub const Tensor = struct {
     }
 
     pub fn specialZetaSelfScalarOut(
-        out: *Tensor, self_scalar: Scalar, other: *Tensor
+        out: *const Tensor, self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_zeta_self_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27115,13 +27351,13 @@ pub const Tensor = struct {
         const c_tensors = __c.atg_split(self.c_tensor,
                 split_size,
                 dim_);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
@@ -27132,19 +27368,19 @@ pub const Tensor = struct {
         const c_tensors = __c.atg_split_copy(self.c_tensor,
                 split_size,
                 dim_);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
 
     pub fn splitCopyTensorOut(
-        self: *const Tensor, out: []*Tensor, split_size: i64, dim_: i64
+        self: *const Tensor, out: []*const Tensor, split_size: i64, dim_: i64
     ) void {
         __c.atg_split_copy_tensor_out(ptrList(out).ptr, @intCast(out.len),
                 self.c_tensor,
@@ -27160,13 +27396,13 @@ pub const Tensor = struct {
         const c_tensors = __c.atg_split_sizes(self.c_tensor,
                 split_size.ptr, @intCast(split_size.len),
                 dim_);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
@@ -27177,13 +27413,13 @@ pub const Tensor = struct {
         const c_tensors = __c.atg_split_with_sizes(self.c_tensor,
                 split_sizes_.ptr, @intCast(split_sizes_.len),
                 dim_);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
@@ -27194,19 +27430,19 @@ pub const Tensor = struct {
         const c_tensors = __c.atg_split_with_sizes_copy(self.c_tensor,
                 split_sizes_.ptr, @intCast(split_sizes_.len),
                 dim_);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
 
     pub fn splitWithSizesCopyOut(
-        self: *const Tensor, out: []*Tensor, split_sizes_: []i64, dim_: i64
+        self: *const Tensor, out: []*const Tensor, split_sizes_: []i64, dim_: i64
     ) void {
         __c.atg_split_with_sizes_copy_out(ptrList(out).ptr, @intCast(out.len),
                 self.c_tensor,
@@ -27235,7 +27471,7 @@ pub const Tensor = struct {
     }
 
     pub fn sqrtOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sqrt_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27263,7 +27499,7 @@ pub const Tensor = struct {
     }
 
     pub fn squareOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_square_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27310,7 +27546,7 @@ pub const Tensor = struct {
     }
 
     pub fn squeezeCopyDimOut(
-        self: *const Tensor, out: *Tensor, dim_: i64
+        self: *const Tensor, out: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_squeeze_copy_dim_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27331,7 +27567,7 @@ pub const Tensor = struct {
     }
 
     pub fn squeezeCopyDimsOut(
-        self: *const Tensor, out: *Tensor, dim_: []i64
+        self: *const Tensor, out: *const Tensor, dim_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_squeeze_copy_dims_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27342,7 +27578,7 @@ pub const Tensor = struct {
     }
 
     pub fn squeezeCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_squeeze_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27392,7 +27628,7 @@ pub const Tensor = struct {
     }
 
     pub fn sspaddmm(
-        self: *const Tensor, mat1: *Tensor, mat2: *Tensor
+        self: *const Tensor, mat1: *const Tensor, mat2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sspaddmm(@ptrCast(&c_tensors), self.c_tensor,
@@ -27403,7 +27639,7 @@ pub const Tensor = struct {
     }
 
     pub fn sspaddmmOut(
-        self: *const Tensor, out: *Tensor, mat1: *Tensor, mat2: *Tensor
+        self: *const Tensor, out: *const Tensor, mat1: *const Tensor, mat2: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sspaddmm_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27415,7 +27651,7 @@ pub const Tensor = struct {
     }
 
     pub fn stack(
-        tensors: []*Tensor, dim_: i64
+        tensors: []*const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_stack(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len),
@@ -27425,7 +27661,7 @@ pub const Tensor = struct {
     }
 
     pub fn stackOut(
-        out: *Tensor, tensors: []*Tensor, dim_: i64
+        out: *const Tensor, tensors: []*const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_stack_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27458,7 +27694,7 @@ pub const Tensor = struct {
     }
 
     pub fn stdCorrectionOut(
-        self: *const Tensor, out: *Tensor, dim_: ?[]i64, correction: Scalar, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: ?[]i64, correction: Scalar, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_std_correction_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27505,7 +27741,7 @@ pub const Tensor = struct {
     }
 
     pub fn stdMeanCorrectionOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, dim_: ?[]i64, correction: Scalar, keepdim: bool
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, dim_: ?[]i64, correction: Scalar, keepdim: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_std_mean_correction_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -27531,7 +27767,7 @@ pub const Tensor = struct {
     }
 
     pub fn stdOut(
-        self: *const Tensor, out: *Tensor, dim_: ?[]i64, unbiased: bool, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: ?[]i64, unbiased: bool, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_std_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27544,7 +27780,7 @@ pub const Tensor = struct {
     }
 
     pub fn stft(
-        self: *const Tensor, n_fft: i64, hop_length: ?i64, win_length: ?i64, window: ?*Tensor, normalized: bool, onesided: bool, return_complex: bool
+        self: *const Tensor, n_fft: i64, hop_length: ?i64, win_length: ?i64, window: ?*const Tensor, normalized: bool, onesided: bool, return_complex: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_stft(@ptrCast(&c_tensors), self.c_tensor,
@@ -27560,7 +27796,7 @@ pub const Tensor = struct {
     }
 
     pub fn stftCenter(
-        self: *const Tensor, n_fft: i64, hop_length: ?i64, win_length: ?i64, window: ?*Tensor, center: bool, pad_mode: []u8, normalized: bool, onesided: bool, return_complex: bool
+        self: *const Tensor, n_fft: i64, hop_length: ?i64, win_length: ?i64, window: ?*const Tensor, center: bool, pad_mode: []const u8, normalized: bool, onesided: bool, return_complex: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_stft_center(@ptrCast(&c_tensors), self.c_tensor,
@@ -27578,7 +27814,7 @@ pub const Tensor = struct {
     }
 
     pub fn sub(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sub(@ptrCast(&c_tensors), self.c_tensor,
@@ -27588,7 +27824,7 @@ pub const Tensor = struct {
     }
 
     pub fn sub_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sub_(@ptrCast(&c_tensors), self.c_tensor,
@@ -27598,7 +27834,7 @@ pub const Tensor = struct {
     }
 
     pub fn subOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sub_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27629,7 +27865,7 @@ pub const Tensor = struct {
     }
 
     pub fn subScalarOut(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sub_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27640,7 +27876,7 @@ pub const Tensor = struct {
     }
 
     pub fn subtract(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_subtract(@ptrCast(&c_tensors), self.c_tensor,
@@ -27650,7 +27886,7 @@ pub const Tensor = struct {
     }
 
     pub fn subtract_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_subtract_(@ptrCast(&c_tensors), self.c_tensor,
@@ -27660,7 +27896,7 @@ pub const Tensor = struct {
     }
 
     pub fn subtractOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_subtract_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27713,7 +27949,7 @@ pub const Tensor = struct {
     }
 
     pub fn sumIntlistOut(
-        self: *const Tensor, out: *Tensor, dim_: ?[]i64, keepdim: bool, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, dim_: ?[]i64, keepdim: bool, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sum_intlist_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27726,7 +27962,7 @@ pub const Tensor = struct {
     }
 
     pub fn sumOut(
-        self: *const Tensor, out: *Tensor, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sum_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27758,7 +27994,7 @@ pub const Tensor = struct {
     }
 
     pub fn svdU(
-        self: *const Tensor, u: *Tensor, s: *Tensor, v: *Tensor, some: bool, compute_uv: bool
+        self: *const Tensor, u: *const Tensor, s: *const Tensor, v: *const Tensor, some: bool, compute_uv: bool
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_svd_u(@ptrCast(&c_tensors), u.c_tensor,
@@ -27843,7 +28079,7 @@ pub const Tensor = struct {
     }
 
     pub fn tCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_t_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27853,7 +28089,7 @@ pub const Tensor = struct {
     }
 
     pub fn take(
-        self: *const Tensor, index_: *Tensor
+        self: *const Tensor, index_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_take(@ptrCast(&c_tensors), self.c_tensor,
@@ -27863,7 +28099,7 @@ pub const Tensor = struct {
     }
 
     pub fn takeAlongDim(
-        self: *const Tensor, indices_: *Tensor, dim_: ?i64
+        self: *const Tensor, indices_: *const Tensor, dim_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_take_along_dim(@ptrCast(&c_tensors), self.c_tensor,
@@ -27874,7 +28110,7 @@ pub const Tensor = struct {
     }
 
     pub fn takeAlongDimOut(
-        self: *const Tensor, out: *Tensor, indices_: *Tensor, dim_: ?i64
+        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, dim_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_take_along_dim_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27886,7 +28122,7 @@ pub const Tensor = struct {
     }
 
     pub fn takeOut(
-        self: *const Tensor, out: *Tensor, index_: *Tensor
+        self: *const Tensor, out: *const Tensor, index_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_take_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27915,7 +28151,7 @@ pub const Tensor = struct {
     }
 
     pub fn tanOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_tan_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27943,7 +28179,7 @@ pub const Tensor = struct {
     }
 
     pub fn tanhBackward(
-        grad_output: *Tensor, output: *Tensor
+        grad_output: *const Tensor, output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_tanh_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -27953,7 +28189,7 @@ pub const Tensor = struct {
     }
 
     pub fn tanhBackwardGradInput(
-        grad_input: *Tensor, grad_output: *Tensor, output: *Tensor
+        grad_input: *const Tensor, grad_output: *const Tensor, output: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_tanh_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -27964,7 +28200,7 @@ pub const Tensor = struct {
     }
 
     pub fn tanhOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_tanh_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27979,13 +28215,13 @@ pub const Tensor = struct {
         const c_tensors = __c.atg_tensor_split(self.c_tensor,
                 sections,
                 dim_);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
@@ -27996,36 +28232,36 @@ pub const Tensor = struct {
         const c_tensors = __c.atg_tensor_split_indices(self.c_tensor,
                 indices_.ptr, @intCast(indices_.len),
                 dim_);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
 
     pub fn tensorSplitTensorIndicesOrSections(
-        self: *const Tensor, tensor_indices_or_sections: *Tensor, dim_: i64
+        self: *const Tensor, tensor_indices_or_sections: *const Tensor, dim_: i64
     ) []Tensor {
         const c_tensors = __c.atg_tensor_split_tensor_indices_or_sections(self.c_tensor,
                 tensor_indices_or_sections.c_tensor,
                 dim_);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
 
     pub fn tensordot(
-        self: *const Tensor, other: *Tensor, dims_self: []i64, dims_other: []i64
+        self: *const Tensor, other: *const Tensor, dims_self: []i64, dims_other: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_tensordot(@ptrCast(&c_tensors), self.c_tensor,
@@ -28037,7 +28273,7 @@ pub const Tensor = struct {
     }
 
     pub fn tensordotOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor, dims_self: []i64, dims_other: []i64
+        self: *const Tensor, out: *const Tensor, other: *const Tensor, dims_self: []i64, dims_other: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_tensordot_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -28072,7 +28308,7 @@ pub const Tensor = struct {
     }
 
     pub fn thresholdBackward(
-        self: *const Tensor, grad_output: *Tensor, threshold_: Scalar
+        self: *const Tensor, grad_output: *const Tensor, threshold_: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_threshold_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -28083,7 +28319,7 @@ pub const Tensor = struct {
     }
 
     pub fn thresholdBackwardGradInput(
-        self: *const Tensor, grad_input: *Tensor, grad_output: *Tensor, threshold_: Scalar
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, threshold_: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_threshold_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -28095,7 +28331,7 @@ pub const Tensor = struct {
     }
 
     pub fn thresholdOut(
-        self: *const Tensor, out: *Tensor, threshold_: Scalar, value: Scalar
+        self: *const Tensor, out: *const Tensor, threshold_: Scalar, value: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_threshold_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -28138,7 +28374,7 @@ pub const Tensor = struct {
     }
 
     pub fn toDenseBackward(
-        self: *const Tensor, gradient: *Tensor, masked_grad: bool
+        self: *const Tensor, gradient: *const Tensor, masked_grad: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_dense_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -28149,38 +28385,38 @@ pub const Tensor = struct {
     }
 
     pub fn toDevice(
-        self: *const Tensor, device_: Device, dtype: Kind, non_blocking: bool, copy: bool
+        self: *const Tensor, device_: Device, dtype: Kind, non_blocking: bool, copy_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_device(@ptrCast(&c_tensors), self.c_tensor,
                 device_.cInt(),
                 dtype.cInt(),
                 if (non_blocking)  1  else  0,
-                if (copy)  1  else  0);
+                if (copy_)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn toDtype(
-        self: *const Tensor, dtype: Kind, non_blocking: bool, copy: bool
+        self: *const Tensor, dtype: Kind, non_blocking: bool, copy_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_dtype(@ptrCast(&c_tensors), self.c_tensor,
                 dtype.cInt(),
                 if (non_blocking)  1  else  0,
-                if (copy)  1  else  0);
+                if (copy_)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn toDtypeLayout(
-        self: *const Tensor, options: TensorOptions, non_blocking: bool, copy: bool
+        self: *const Tensor, options_: TensorOptions, non_blocking: bool, copy_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_dtype_layout(@ptrCast(&c_tensors), self.c_tensor,
-                options.kind.cInt(), options.device.cInt(),
+                options_.kind.cInt(), options_.device.cInt(),
                 if (non_blocking)  1  else  0,
-                if (copy)  1  else  0);
+                if (copy_)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28196,7 +28432,7 @@ pub const Tensor = struct {
     }
 
     pub fn toMkldnnBackward(
-        self: *const Tensor, gradient: *Tensor
+        self: *const Tensor, gradient: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_mkldnn_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -28206,7 +28442,7 @@ pub const Tensor = struct {
     }
 
     pub fn toMkldnnOut(
-        self: *const Tensor, out: *Tensor, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_mkldnn_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -28217,13 +28453,13 @@ pub const Tensor = struct {
     }
 
     pub fn toOther(
-        self: *const Tensor, other: *Tensor, non_blocking: bool, copy: bool
+        self: *const Tensor, other: *const Tensor, non_blocking: bool, copy_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_other(@ptrCast(&c_tensors), self.c_tensor,
                 other.c_tensor,
                 if (non_blocking)  1  else  0,
-                if (copy)  1  else  0);
+                if (copy_)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28240,7 +28476,7 @@ pub const Tensor = struct {
     }
 
     pub fn toPaddedTensorOut(
-        self: *const Tensor, out: *Tensor, padding: f64, output_size: ?[]i64
+        self: *const Tensor, out: *const Tensor, padding: f64, output_size: ?[]i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_padded_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -28329,7 +28565,7 @@ pub const Tensor = struct {
     }
 
     pub fn topkValues(
-        self: *const Tensor, values_: *Tensor, indices_: *Tensor, k: i64, dim_: i64, largest: bool, sorted: bool
+        self: *const Tensor, values_: *const Tensor, indices_: *const Tensor, k: i64, dim_: i64, largest: bool, sorted: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_topk_values(@ptrCast(&c_tensors), values_.c_tensor,
@@ -28363,7 +28599,7 @@ pub const Tensor = struct {
     }
 
     pub fn traceBackward(
-        gradient: *Tensor, sizes: []i64
+        gradient: *const Tensor, sizes: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_trace_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -28373,7 +28609,7 @@ pub const Tensor = struct {
     }
 
     pub fn traceOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_trace_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -28416,7 +28652,7 @@ pub const Tensor = struct {
     }
 
     pub fn transposeCopyIntOut(
-        self: *const Tensor, out: *Tensor, dim0: i64, dim1: i64
+        self: *const Tensor, out: *const Tensor, dim0: i64, dim1: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_transpose_copy_int_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -28428,7 +28664,7 @@ pub const Tensor = struct {
     }
 
     pub fn trapezoid(
-        y: *Tensor, dim_: i64
+        y: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_trapezoid(@ptrCast(&c_tensors), y.c_tensor,
@@ -28438,7 +28674,7 @@ pub const Tensor = struct {
     }
 
     pub fn trapezoidX(
-        y: *Tensor, x: *Tensor, dim_: i64
+        y: *const Tensor, x: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_trapezoid_x(@ptrCast(&c_tensors), y.c_tensor,
@@ -28449,7 +28685,7 @@ pub const Tensor = struct {
     }
 
     pub fn trapz(
-        y: *Tensor, x: *Tensor, dim_: i64
+        y: *const Tensor, x: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_trapz(@ptrCast(&c_tensors), y.c_tensor,
@@ -28460,7 +28696,7 @@ pub const Tensor = struct {
     }
 
     pub fn trapzDx(
-        y: *Tensor, dx: f64, dim_: i64
+        y: *const Tensor, dx: f64, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_trapz_dx(@ptrCast(&c_tensors), y.c_tensor,
@@ -28471,7 +28707,7 @@ pub const Tensor = struct {
     }
 
     pub fn triangularSolve(
-        self: *const Tensor, a: *Tensor, upper: bool, transpose_: bool, unitriangular: bool
+        self: *const Tensor, a: *const Tensor, upper: bool, transpose_: bool, unitriangular: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_triangular_solve(@ptrCast(&c_tensors), self.c_tensor,
@@ -28484,7 +28720,7 @@ pub const Tensor = struct {
     }
 
     pub fn triangularSolveX(
-        self: *const Tensor, x: *Tensor, m: *Tensor, a: *Tensor, upper: bool, transpose_: bool, unitriangular: bool
+        self: *const Tensor, x: *const Tensor, m: *const Tensor, a: *const Tensor, upper: bool, transpose_: bool, unitriangular: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_triangular_solve_x(@ptrCast(&c_tensors), x.c_tensor,
@@ -28519,19 +28755,19 @@ pub const Tensor = struct {
     }
 
     pub fn trilIndices(
-        row: i64, col: i64, offset: i64, options: TensorOptions
+        row: i64, col: i64, offset: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_tril_indices(@ptrCast(&c_tensors), row,
                 col,
                 offset,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn trilIndicesOut(
-        out: *Tensor, row: i64, col: i64, offset: i64
+        out: *const Tensor, row: i64, col: i64, offset: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_tril_indices_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -28543,7 +28779,7 @@ pub const Tensor = struct {
     }
 
     pub fn trilOut(
-        self: *const Tensor, out: *Tensor, diagonal_: i64
+        self: *const Tensor, out: *const Tensor, diagonal_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_tril_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -28554,7 +28790,7 @@ pub const Tensor = struct {
     }
 
     pub fn tripletMarginLoss(
-        anchor: *Tensor, positive_: *Tensor, negative_: *Tensor, margin: f64, p: f64, eps: f64, swap: bool, reduction: i64
+        anchor: *const Tensor, positive_: *const Tensor, negative_: *const Tensor, margin: f64, p: f64, eps: f64, swap: bool, reduction: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_triplet_margin_loss(@ptrCast(&c_tensors), anchor.c_tensor,
@@ -28590,19 +28826,19 @@ pub const Tensor = struct {
     }
 
     pub fn triuIndices(
-        row: i64, col: i64, offset: i64, options: TensorOptions
+        row: i64, col: i64, offset: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_triu_indices(@ptrCast(&c_tensors), row,
                 col,
                 offset,
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn triuIndicesOut(
-        out: *Tensor, row: i64, col: i64, offset: i64
+        out: *const Tensor, row: i64, col: i64, offset: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_triu_indices_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -28614,7 +28850,7 @@ pub const Tensor = struct {
     }
 
     pub fn triuOut(
-        self: *const Tensor, out: *Tensor, diagonal_: i64
+        self: *const Tensor, out: *const Tensor, diagonal_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_triu_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -28625,7 +28861,7 @@ pub const Tensor = struct {
     }
 
     pub fn trueDivide(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_true_divide(@ptrCast(&c_tensors), self.c_tensor,
@@ -28635,7 +28871,7 @@ pub const Tensor = struct {
     }
 
     pub fn trueDivide_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_true_divide_(@ptrCast(&c_tensors), self.c_tensor,
@@ -28645,7 +28881,7 @@ pub const Tensor = struct {
     }
 
     pub fn trueDivideOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_true_divide_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -28694,7 +28930,7 @@ pub const Tensor = struct {
     }
 
     pub fn truncOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_trunc_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -28704,7 +28940,7 @@ pub const Tensor = struct {
     }
 
     pub fn typeAs(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_type_as(@ptrCast(&c_tensors), self.c_tensor,
@@ -28718,13 +28954,13 @@ pub const Tensor = struct {
     ) []Tensor {
         const c_tensors = __c.atg_unbind(self.c_tensor,
                 dim_);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
@@ -28734,19 +28970,19 @@ pub const Tensor = struct {
     ) []Tensor {
         const c_tensors = __c.atg_unbind_copy(self.c_tensor,
                 dim_);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
 
     pub fn unbindCopyIntOut(
-        self: *const Tensor, out: []*Tensor, dim_: i64
+        self: *const Tensor, out: []*const Tensor, dim_: i64
     ) void {
         __c.atg_unbind_copy_int_out(ptrList(out).ptr, @intCast(out.len),
                 self.c_tensor,
@@ -28767,17 +29003,17 @@ pub const Tensor = struct {
     }
 
     pub fn unflattenDenseTensors(
-        flat: *Tensor, tensors: []*Tensor
+        flat: *const Tensor, tensors: []*const Tensor
     ) []Tensor {
         const c_tensors = __c.atg_unflatten_dense_tensors(flat.c_tensor,
                 ptrList(tensors).ptr, @intCast(tensors.len));
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
@@ -28795,7 +29031,7 @@ pub const Tensor = struct {
     }
 
     pub fn unfoldBackward(
-        grad_in: *Tensor, input_sizes: []i64, dim_: i64, size_: i64, step: i64
+        grad_in: *const Tensor, input_sizes: []i64, dim_: i64, size_: i64, step: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_unfold_backward(@ptrCast(&c_tensors), grad_in.c_tensor,
@@ -28808,7 +29044,7 @@ pub const Tensor = struct {
     }
 
     pub fn unfoldBackwardOut(
-        out: *Tensor, grad_in: *Tensor, input_sizes: []i64, dim_: i64, size_: i64, step: i64
+        out: *const Tensor, grad_in: *const Tensor, input_sizes: []i64, dim_: i64, size_: i64, step: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_unfold_backward_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -28834,7 +29070,7 @@ pub const Tensor = struct {
     }
 
     pub fn unfoldCopyOut(
-        self: *const Tensor, out: *Tensor, dimension: i64, size_: i64, step: i64
+        self: *const Tensor, out: *const Tensor, dimension: i64, size_: i64, step: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_unfold_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -28869,7 +29105,7 @@ pub const Tensor = struct {
     }
 
     pub fn uniformOut(
-        self: *const Tensor, out: *Tensor, from: f64, to_: f64
+        self: *const Tensor, out: *const Tensor, from: f64, to_: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_uniform_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -28893,7 +29129,7 @@ pub const Tensor = struct {
     }
 
     pub fn uniqueConsecutiveOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, out2: *Tensor, return_inverse: bool, return_counts: bool, dim_: ?i64
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, return_inverse: bool, return_counts: bool, dim_: ?i64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_unique_consecutive_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -28933,7 +29169,7 @@ pub const Tensor = struct {
     }
 
     pub fn uniqueDimConsecutiveOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, out2: *Tensor, dim_: i64, return_inverse: bool, return_counts: bool
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, dim_: i64, return_inverse: bool, return_counts: bool
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_unique_dim_consecutive_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -28948,7 +29184,7 @@ pub const Tensor = struct {
     }
 
     pub fn uniqueDimOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, out2: *Tensor, dim_: i64, sorted: bool, return_inverse: bool, return_counts: bool
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, dim_: i64, sorted: bool, return_inverse: bool, return_counts: bool
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_unique_dim_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -28969,13 +29205,13 @@ pub const Tensor = struct {
         const c_tensors = __c.atg_unsafe_chunk(self.c_tensor,
                 chunks,
                 dim_);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
@@ -28986,19 +29222,19 @@ pub const Tensor = struct {
         const c_tensors = __c.atg_unsafe_split(self.c_tensor,
                 split_size,
                 dim_);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
 
     pub fn unsafeSplitTensorOut(
-        self: *const Tensor, out: []*Tensor, split_size: i64, dim_: i64
+        self: *const Tensor, out: []*const Tensor, split_size: i64, dim_: i64
     ) void {
         __c.atg_unsafe_split_tensor_out(ptrList(out).ptr, @intCast(out.len),
                 self.c_tensor,
@@ -29014,19 +29250,19 @@ pub const Tensor = struct {
         const c_tensors = __c.atg_unsafe_split_with_sizes(self.c_tensor,
                 split_sizes_.ptr, @intCast(split_sizes_.len),
                 dim_);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
 
     pub fn unsafeSplitWithSizesOut(
-        self: *const Tensor, out: []*Tensor, split_sizes_: []i64, dim_: i64
+        self: *const Tensor, out: []*const Tensor, split_sizes_: []i64, dim_: i64
     ) void {
         __c.atg_unsafe_split_with_sizes_out(ptrList(out).ptr, @intCast(out.len),
                 self.c_tensor,
@@ -29067,7 +29303,7 @@ pub const Tensor = struct {
     }
 
     pub fn unsqueezeCopyOut(
-        self: *const Tensor, out: *Tensor, dim_: i64
+        self: *const Tensor, out: *const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_unsqueeze_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -29091,7 +29327,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleBicubic2dBackward(
-        grad_output: *Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_bicubic2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -29105,7 +29341,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleBicubic2dBackwardGradInput(
-        grad_input: *Tensor, grad_output: *Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_bicubic2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -29120,7 +29356,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleBicubic2dOut(
-        self: *const Tensor, out: *Tensor, output_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_bicubic2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -29159,7 +29395,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleBilinear2dBackward(
-        grad_output: *Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_bilinear2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -29173,7 +29409,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleBilinear2dBackwardGradInput(
-        grad_input: *Tensor, grad_output: *Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_bilinear2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -29188,7 +29424,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleBilinear2dOut(
-        self: *const Tensor, out: *Tensor, output_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_bilinear2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -29226,7 +29462,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleLinear1dBackward(
-        grad_output: *Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales: ?f64
+        grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_linear1d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -29239,7 +29475,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleLinear1dBackwardGradInput(
-        grad_input: *Tensor, grad_output: *Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_linear1d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -29253,7 +29489,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleLinear1dOut(
-        self: *const Tensor, out: *Tensor, output_size: []i64, align_corners: bool, scales: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []i64, align_corners: bool, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_linear1d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -29289,7 +29525,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleNearest1dBackward(
-        grad_output: *Tensor, output_size: []i64, input_size: []i64, scales: ?f64
+        grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest1d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -29301,7 +29537,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleNearest1dBackwardGradInput(
-        grad_input: *Tensor, grad_output: *Tensor, output_size: []i64, input_size: []i64, scales: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest1d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -29314,7 +29550,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleNearest1dOut(
-        self: *const Tensor, out: *Tensor, output_size: []i64, scales: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []i64, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest1d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -29349,7 +29585,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleNearest2dBackward(
-        grad_output: *Tensor, output_size: []i64, input_size: []i64, scales_h: ?f64, scales_w: ?f64
+        grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -29362,7 +29598,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleNearest2dBackwardGradInput(
-        grad_input: *Tensor, grad_output: *Tensor, output_size: []i64, input_size: []i64, scales_h: ?f64, scales_w: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -29376,7 +29612,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleNearest2dOut(
-        self: *const Tensor, out: *Tensor, output_size: []i64, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []i64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -29413,7 +29649,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleNearest3dBackward(
-        grad_output: *Tensor, output_size: []i64, input_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest3d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -29427,7 +29663,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleNearest3dBackwardGradInput(
-        grad_input: *Tensor, grad_output: *Tensor, output_size: []i64, input_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest3d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -29442,7 +29678,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleNearest3dOut(
-        self: *const Tensor, out: *Tensor, output_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest3d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -29481,7 +29717,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleTrilinear3dBackward(
-        grad_output: *Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_trilinear3d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -29496,7 +29732,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleTrilinear3dBackwardGradInput(
-        grad_input: *Tensor, grad_output: *Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_trilinear3d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -29512,7 +29748,7 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleTrilinear3dOut(
-        self: *const Tensor, out: *Tensor, output_size: []i64, align_corners: bool, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []i64, align_corners: bool, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_trilinear3d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -29539,7 +29775,7 @@ pub const Tensor = struct {
     }
 
     pub fn valueSelectingReductionBackward(
-        gradient: *Tensor, dim_: i64, indices_: *Tensor, sizes: []i64, keepdim: bool
+        gradient: *const Tensor, dim_: i64, indices_: *const Tensor, sizes: []i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_value_selecting_reduction_backward(@ptrCast(&c_tensors), gradient.c_tensor,
@@ -29570,7 +29806,7 @@ pub const Tensor = struct {
     }
 
     pub fn valuesCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_values_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -29580,7 +29816,7 @@ pub const Tensor = struct {
     }
 
     pub fn vander(
-        x: *Tensor, n: ?i64, increasing: bool
+        x: *const Tensor, n: ?i64, increasing: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_vander(@ptrCast(&c_tensors), x.c_tensor,
@@ -29613,7 +29849,7 @@ pub const Tensor = struct {
     }
 
     pub fn varCorrectionOut(
-        self: *const Tensor, out: *Tensor, dim_: ?[]i64, correction: Scalar, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: ?[]i64, correction: Scalar, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_var_correction_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -29660,7 +29896,7 @@ pub const Tensor = struct {
     }
 
     pub fn varMeanCorrectionOut(
-        self: *const Tensor, out0: *Tensor, out1: *Tensor, dim_: ?[]i64, correction: Scalar, keepdim: bool
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, dim_: ?[]i64, correction: Scalar, keepdim: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_var_mean_correction_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -29686,7 +29922,7 @@ pub const Tensor = struct {
     }
 
     pub fn varOut(
-        self: *const Tensor, out: *Tensor, dim_: ?[]i64, unbiased: bool, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: ?[]i64, unbiased: bool, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_var_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -29699,7 +29935,7 @@ pub const Tensor = struct {
     }
 
     pub fn vdot(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_vdot(@ptrCast(&c_tensors), self.c_tensor,
@@ -29709,7 +29945,7 @@ pub const Tensor = struct {
     }
 
     pub fn vdotOut(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_vdot_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -29730,7 +29966,7 @@ pub const Tensor = struct {
     }
 
     pub fn viewAs(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_view_as(@ptrCast(&c_tensors), self.c_tensor,
@@ -29758,7 +29994,7 @@ pub const Tensor = struct {
     }
 
     pub fn viewAsComplexCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_view_as_complex_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -29786,7 +30022,7 @@ pub const Tensor = struct {
     }
 
     pub fn viewAsRealCopyOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_view_as_real_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -29816,7 +30052,7 @@ pub const Tensor = struct {
     }
 
     pub fn viewCopyDtypeOut(
-        self: *const Tensor, out: *Tensor, dtype: Kind
+        self: *const Tensor, out: *const Tensor, dtype: Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_view_copy_dtype_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -29827,7 +30063,7 @@ pub const Tensor = struct {
     }
 
     pub fn viewCopyOut(
-        self: *const Tensor, out: *Tensor, size_: []i64
+        self: *const Tensor, out: *const Tensor, size_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_view_copy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -29852,13 +30088,13 @@ pub const Tensor = struct {
     ) []Tensor {
         const c_tensors = __c.atg_vsplit(self.c_tensor,
                 sections);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
@@ -29868,19 +30104,19 @@ pub const Tensor = struct {
     ) []Tensor {
         const c_tensors = __c.atg_vsplit_array(self.c_tensor,
                 indices_.ptr, @intCast(indices_.len));
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
 
     pub fn vstack(
-        tensors: []*Tensor
+        tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_vstack(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len));
@@ -29889,7 +30125,7 @@ pub const Tensor = struct {
     }
 
     pub fn vstackOut(
-        out: *Tensor, tensors: []*Tensor
+        out: *const Tensor, tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_vstack_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -29899,22 +30135,22 @@ pub const Tensor = struct {
     }
 
     pub fn where(
-        condition: *Tensor
+        condition: *const Tensor
     ) []Tensor {
         const c_tensors = __c.atg_where(condition.c_tensor);
-        var r__ = std.ArrayList(Tensor).init(_global_allocator);
-        var i: usize = 0;
+        var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
+        var idx: usize = 0;
         while (true) {
-            const c__ = c_tensors[i];
+            const c__ = c_tensors[idx];
             if (c__ == null) break;
             r__.append(Tensor{ .c_tensor = c__ });
-            i += 1;
+            idx += 1;
         }
         return r__;
     }
 
     pub fn whereScalar(
-        condition: *Tensor, self_scalar: Scalar, other: Scalar
+        condition: *const Tensor, self_scalar: Scalar, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_where_scalar(@ptrCast(&c_tensors), condition.c_tensor,
@@ -29925,7 +30161,7 @@ pub const Tensor = struct {
     }
 
     pub fn whereScalarother(
-        self: *const Tensor, condition: *Tensor, other: Scalar
+        self: *const Tensor, condition: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_where_scalarother(@ptrCast(&c_tensors), condition.c_tensor,
@@ -29936,7 +30172,7 @@ pub const Tensor = struct {
     }
 
     pub fn whereScalarself(
-        condition: *Tensor, self_scalar: Scalar, other: *Tensor
+        condition: *const Tensor, self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_where_scalarself(@ptrCast(&c_tensors), condition.c_tensor,
@@ -29947,7 +30183,7 @@ pub const Tensor = struct {
     }
 
     pub fn whereSelf(
-        self: *const Tensor, condition: *Tensor, other: *Tensor
+        self: *const Tensor, condition: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_where_self(@ptrCast(&c_tensors), condition.c_tensor,
@@ -29958,7 +30194,7 @@ pub const Tensor = struct {
     }
 
     pub fn whereSelfOut(
-        self: *const Tensor, out: *Tensor, condition: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, condition: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_where_self_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -29970,7 +30206,7 @@ pub const Tensor = struct {
     }
 
     pub fn xlogy(
-        self: *const Tensor, other: *Tensor
+        self: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_xlogy(@ptrCast(&c_tensors), self.c_tensor,
@@ -29980,7 +30216,7 @@ pub const Tensor = struct {
     }
 
     pub fn xlogy_(
-        self: *Tensor, other: *Tensor
+        self: *Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_xlogy_(@ptrCast(&c_tensors), self.c_tensor,
@@ -29990,7 +30226,7 @@ pub const Tensor = struct {
     }
 
     pub fn xlogyOutscalarOther(
-        self: *const Tensor, out: *Tensor, other: Scalar
+        self: *const Tensor, out: *const Tensor, other: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_xlogy_outscalar_other(@ptrCast(&c_tensors), out.c_tensor,
@@ -30001,7 +30237,7 @@ pub const Tensor = struct {
     }
 
     pub fn xlogyOutscalarSelf(
-        out: *Tensor, self_scalar: Scalar, other: *Tensor
+        out: *const Tensor, self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_xlogy_outscalar_self(@ptrCast(&c_tensors), out.c_tensor,
@@ -30012,7 +30248,7 @@ pub const Tensor = struct {
     }
 
     pub fn xlogyOuttensor(
-        self: *const Tensor, out: *Tensor, other: *Tensor
+        self: *const Tensor, out: *const Tensor, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_xlogy_outtensor(@ptrCast(&c_tensors), out.c_tensor,
@@ -30043,7 +30279,7 @@ pub const Tensor = struct {
     }
 
     pub fn xlogyScalarSelf(
-        self_scalar: Scalar, other: *Tensor
+        self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_xlogy_scalar_self(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
@@ -30071,7 +30307,7 @@ pub const Tensor = struct {
     }
 
     pub fn zeroOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_zero_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -30081,11 +30317,11 @@ pub const Tensor = struct {
     }
 
     pub fn zeros(
-        size_: []i64, options: TensorOptions
+        size_: []i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_zeros(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
-                options.kind.cInt(), options.device.cInt());
+                options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -30100,7 +30336,7 @@ pub const Tensor = struct {
     }
 
     pub fn zerosLikeOut(
-        self: *const Tensor, out: *Tensor
+        self: *const Tensor, out: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_zeros_like_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -30110,7 +30346,7 @@ pub const Tensor = struct {
     }
 
     pub fn zerosOut(
-        out: *Tensor, size_: []i64
+        out: *const Tensor, size_: []i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_zeros_out(@ptrCast(&c_tensors), out.c_tensor,

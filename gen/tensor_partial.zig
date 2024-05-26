@@ -14,16 +14,43 @@ const Kind = torch.Kind;
 const Scalar = torch.Scalar;
 const Layout = torch.Layout;
 const C_tensor = __c.tensor;
-const _global_allocator = torch.global_allocator;
+
+pub const Reduction = enum {
+    None,
+    Mean,
+    Sum,
+
+    pub fn toInt(self: Reduction) i64 {
+        return switch (self) {
+            .None => 0,
+            .Mean => 1,
+            .Sum => 2,
+        };
+    }
+};
 
 fn ptrList(l: []?Tensor) []*C_tensor {
-    _ = l;
-    // l.iter().map(|x| x.as_ref().map_or(std::ptr::null_mut(), |x| \
-    // x.borrow().c_tensor)).collect()";
+    var ret = std.ArrayList(*C_tensor).init(torch.global_allocator);
+    for (l) |x| {
+        ret.append(x.c_tensor);
+    }
+    return ret.toOwnedSlice();
 }
 fn ptrListOpt(l: []Tensor) []*C_tensor {
-    _ = l;
+    return ptrList(l);
 }
+
+pub const TensorIndexer = union(enum) {
+    Select: i64,
+    Narrow: struct {
+        start: ?i64,
+        end: ?i64,
+    },
+    IndexSelect: *const Tensor,
+    InsertNewAxis: void,
+};
+
+pub const NewAxis = struct {};
 
 pub const Tensor = struct {
     c_tensor: C_tensor,
@@ -31,6 +58,104 @@ pub const Tensor = struct {
         const ret = __c.at_new_tensor();
         torch.readAndCleanError();
         return Tensor{ .c_tensor = ret };
+    }
+    // TODO: implement this for formatted printing, for now we can just use the default print
+    // pub fn format(self: Tensor, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype,) !void {
+    // }
+
+    pub fn i(self: *const Tensor, index_spec: anytype) Tensor {
+        // TODO: add case for just a single int index
+        var specs = std.ArrayList(TensorIndexer).init(torch.global_allocator);
+        defer specs.deinit();
+        inline for (index_spec) |spec| {
+            const spec_ = switch (@TypeOf(spec)) {
+                NewAxis => TensorIndexer.InsertNewAxis,
+                i64, comptime_int => TensorIndexer{ .Select = spec },
+                struct { start: ?i64, end: ?i64 } => TensorIndexer{ .Narrow = spec },
+                []i64 => blk_i64: {
+                    const index_tensor = Tensor.fromSlice(i64, spec);
+                    break :blk_i64 TensorIndexer{ .IndexSelect = index_tensor };
+                },
+                Tensor => TensorIndexer{ .IndexSelect = spec.shallowClone() },
+                else => {
+                    std.log.err("unsupported index spec type: {any}", .{@TypeOf(spec)});
+                    unreachable;
+                },
+            };
+            specs.append(spec_) catch unreachable;
+        }
+        return self.indexer(specs.items);
+    }
+
+    fn indexer(self: *const Tensor, index_spec: []TensorIndexer) Tensor {
+        var n_newaxis: usize = 0;
+        for (index_spec) |spec| {
+            if (spec == TensorIndexer.InsertNewAxis) {
+                n_newaxis += 1;
+            }
+        }
+
+        if (index_spec.len > self.size().len + n_newaxis) {
+            std.log.err("too many indices for tensor of dimension {d}", .{self.size().len});
+            unreachable;
+        }
+
+        for (index_spec) |spec| {
+            switch (spec) {
+                .IndexSelect => |tensor| {
+                    if (tensor.size().len != 1) {
+                        std.log.err("expected 1-d tensor, got {}", .{tensor.size().len});
+                        unreachable;
+                    }
+
+                    switch (tensor.kind()) {
+                        .Int64, .Int16, .Int8, .Int => {},
+                        else => {
+                            std.log.err("expected int tensor for indices, got {}", .{tensor.kind()});
+                            unreachable;
+                        },
+                    }
+                },
+                else => {},
+            }
+        }
+
+        var curr_tensor = self.shallowClone();
+        var curr_idx: usize = 0;
+
+        for (index_spec) |spec| {
+            switch (spec) {
+                TensorIndexer.InsertNewAxis => {
+                    curr_tensor = curr_tensor.unsqueeze(@intCast(curr_idx));
+                    curr_idx += 1;
+                },
+                TensorIndexer.Select => |idx| {
+                    curr_tensor = curr_tensor.select(@intCast(curr_idx), @intCast(idx));
+                },
+                TensorIndexer.Narrow => |narrow_| {
+                    const size_ = self.size();
+                    const start = narrow_.start orelse 0;
+                    const end = narrow_.end orelse size_[curr_idx];
+                    if (start < 0 or end < start or end > size_[curr_idx]) {
+                        std.log.err("invalid start/end for narrow: start={}, end={}, shape={}", .{ start, end, size_[curr_idx] });
+                        unreachable;
+                    }
+                    const length = end - start;
+                    curr_tensor = curr_tensor.narrow(@intCast(curr_idx), start, length);
+                    curr_idx += 1;
+                },
+                TensorIndexer.IndexSelect => |index_tensor| {
+                    curr_tensor = curr_tensor.indexSelect(@intCast(curr_idx), index_tensor);
+                    curr_idx += 1;
+                },
+            }
+        }
+
+        return curr_tensor;
+    }
+
+    pub fn options(self: *const Tensor) TensorOptions {
+        return TensorOptions{ .kind = self.kind(), .device = self.device() };
     }
 
     pub fn fromPtr(c_tensor: C_tensor) Tensor {
@@ -43,27 +168,29 @@ pub const Tensor = struct {
         return Tensor{ .c_tensor = tensor };
     }
 
-    pub fn asPtr(self: Tensor) C_tensor {
+    pub fn asPtr(self: *const Tensor) C_tensor {
         return self.c_tensor;
     }
 
-    pub fn dim(self: *Tensor) usize {
+    pub fn dim(self: *const Tensor) usize {
         const ret = __c.at_dim(self.c_tensor);
         torch.readAndCleanError();
         return ret;
     }
 
-    pub fn size(self: *Tensor) ![]i64 {
+    pub fn size(self: *const Tensor) []i64 {
         const dim_ = __c.at_dim(self.c_tensor);
         torch.readAndCleanError();
-        var sz = std.ArrayList(i64).init(_global_allocator);
-        try sz.resize(dim_);
-        __c.at_shape(self.c_tensor, sz.items);
+        var sz = std.ArrayList(i64).init(torch.global_allocator);
+        sz.resize(dim_) catch unreachable;
+        const items = torch.global_allocator.dupeZ(i64, sz.items) catch unreachable;
+        defer torch.global_allocator.free(items);
+        __c.at_shape(self.c_tensor, items);
         torch.readAndCleanError();
-        return sz.toOwnedSlice();
+        return sz.toOwnedSlice() catch unreachable;
     }
 
-    pub fn sizeDims(comptime dims: usize, self: *Tensor) ![dims]i64 {
+    pub fn sizeDims(self: *const Tensor, comptime dims: usize) ![dims]i64 {
         const size_ = self.size();
         if (size_.len != dims) {
             std.log.err("expected {} dims, got {}", .{ dims, size_.len });
@@ -72,16 +199,16 @@ pub const Tensor = struct {
         return size_[0..dims];
     }
 
-    pub fn stride(self: *Tensor) ![]i64 {
+    pub fn stride(self: *const Tensor) ![]i64 {
         const dim_ = self.dim();
-        var sz = std.ArrayList(i64).init(_global_allocator);
+        var sz = std.ArrayList(i64).init(torch.global_allocator);
         try sz.resize(dim_);
         __c.at_stride(self.c_tensor, sz.items);
         torch.readAndCleanError();
         return sz.toOwnedSlice();
     }
 
-    pub fn strideDims(comptime dims: usize, self: *Tensor) ![dims]i64 {
+    pub fn strideDims(self: *const Tensor, comptime dims: usize) ![dims]i64 {
         const stride_ = self.stride();
         if (stride_.len != dims) {
             std.log.err("expected one dim, got {}", .{stride_.len});
@@ -90,36 +217,36 @@ pub const Tensor = struct {
         return stride_[0..dims];
     }
 
-    pub fn kind(self: *Tensor) Kind {
+    pub fn kind(self: *const Tensor) Kind {
         const kind_ = __c.at_scalar_type(self.c_tensor);
         torch.readAndCleanError();
         return Kind.fromCInt(kind_);
     }
 
-    pub fn device(self: *Tensor) Device {
+    pub fn device(self: *const Tensor) Device {
         const device_ = __c.at_device(self.c_tensor);
         torch.readAndCleanError();
         return Device.fromCInt(device_);
     }
 
-    pub fn print(self: *Tensor) void {
+    pub fn print(self: *const Tensor) void {
         __c.at_print(self.c_tensor);
         torch.readAndCleanError();
     }
 
-    pub fn doubleValue(self: *Tensor, idx: []i64) f64 {
+    pub fn doubleValue(self: *const Tensor, idx: []i64) f64 {
         const ret = __c.at_double_value_at_indexes(self.c_tensor, idx.items, idx.len);
         torch.readAndCleanError();
         return ret;
     }
 
-    pub fn int64Value(self: *Tensor, idx: []i64) i64 {
+    pub fn int64Value(self: *const Tensor, idx: []i64) i64 {
         const ret = __c.at_int64_value_at_indexes(self.c_tensor, idx.items, idx.len);
         torch.readAndCleanError();
         return ret;
     }
 
-    pub fn requiresGrad(self: *Tensor) bool {
+    pub fn requiresGrad(self: *const Tensor) bool {
         const ret = __c.at_requires_grad(self.c_tensor);
         torch.readAndCleanError();
         return ret;
@@ -131,25 +258,25 @@ pub const Tensor = struct {
     //     return ret;
     // }
 
-    pub fn defined(self: *Tensor) bool {
+    pub fn defined(self: *const Tensor) bool {
         const ret = __c.at_defined(self.c_tensor);
         torch.readAndCleanError();
-        return ret;
+        return if (ret != 0) true else false;
     }
 
-    pub fn isMkldnn(self: *Tensor) bool {
+    pub fn isMkldnn(self: *const Tensor) bool {
         const ret = __c.at_is_mkldnn(self.c_tensor);
         torch.readAndCleanError();
         return ret;
     }
 
-    pub fn isSparse(self: *Tensor) bool {
+    pub fn isSparse(self: *const Tensor) bool {
         const ret = __c.at_is_sparse(self.c_tensor);
         torch.readAndCleanError();
         return ret;
     }
 
-    pub fn isContiguous(self: *Tensor) bool {
+    pub fn isContiguous(self: *const Tensor) bool {
         const ret = __c.at_is_contiguous(self.c_tensor);
         torch.readAndCleanError();
         return ret;
@@ -162,8 +289,117 @@ pub const Tensor = struct {
         }
     }
 
+    pub fn backward(self: *Tensor) void {
+        __c.at_backward(self.c_tensor, 0, 0);
+        torch.readAndCleanError();
+    }
+
+    pub fn runBackward(tensors: []Tensor, inputs: []Tensor, keep_graph: bool, create_graph: bool) !std.ArrayList(Tensor) {
+        var outputs = std.ArrayList(C_tensor).init(torch.global_allocator);
+        defer outputs.deinit();
+        try outputs.resize(inputs.len);
+        var inputs_ = ptrList(inputs);
+        var tensors_ = ptrList(tensors);
+
+        __c.at_run_backward(&tensors_, @intCast(tensors_.len), &inputs_, @intCast(inputs_.len), outputs.items, keep_graph, create_graph);
+        torch.readAndCleanError();
+        var res = std.ArrayList(Tensor).init(torch.global_allocator);
+        for (outputs.items) |output| {
+            res.append(Tensor{ .c_tensor = output });
+        }
+        return res;
+    }
+
+    pub fn copyDataU8(self: *Tensor, dst: []u8, numel_: usize) !void {
+        const elt_size_in_bytes = self.kind().eltSizeInBytes();
+        if (dst.len < numel_ * elt_size_in_bytes) {
+            std.log.err("expected buffer of size {}, got {}", .{ numel_ * elt_size_in_bytes, dst.len });
+            return error.BufferTooSmall;
+        }
+        __c.at_copy_data(self.c_tensor, dst.ptr, numel_, elt_size_in_bytes);
+        torch.readAndCleanError();
+    }
+
+    pub fn internalAmpNonFiniteCheckAndUnscale(self: *Tensor, found_inf: *Tensor, inv_scale: *const Tensor) void {
+        __c.at__amp_non_finite_check_and_unscale(self.c_tensor, found_inf.c_tensor, inv_scale.c_tensor);
+        torch.readAndCleanError();
+    }
+
+    pub fn copyData(self: *const Tensor, dst: []*Tensor, numel_: usize) !void {
+        // TODO: Fix this function
+        if (self.kind() != dst.kind()) {
+            std.log.err("expected same kind, got {any} and {any}", .{ self.kind(), dst.kind() });
+            return error.UnexpectedKind;
+        }
+
+        if (dst.len < numel_) {
+            std.log.err("expected buffer of size {}, got {}", .{ numel_, dst.len });
+            return error.BufferTooSmall;
+        }
+
+        __c.at_copy_data(self.c_tensor, dst.c_tensor, numel_);
+        torch.readAndCleanError();
+    }
+
+    pub fn numel(self: *const Tensor) usize {
+        const size_ = self.size();
+        var ret: usize = 1;
+        for (size_) |s| {
+            ret *= @intCast(s);
+        }
+        return ret;
+    }
+
+    pub fn fromSlice(comptime T: type, data_: []T) Tensor {
+        var size_ = [_]i64{@intCast(data_.len)};
+        const kind_ = torch.elementKind(T);
+        const c_tensor = __c.at_tensor_of_data(data_.ptr, &size_, 1, kind_.eltSizeInBytes(), kind_.cInt());
+        torch.readAndCleanError();
+        return Tensor{ .c_tensor = c_tensor };
+    }
+
     pub fn free(self: *Tensor) void {
         __c.at_free(self.c_tensor);
         torch.readAndCleanError();
+    }
+
+    // TODO: finish rest of the functions
+
+    pub fn shallowClone(self: *const Tensor) Tensor {
+        const c_tensor = __c.at_shallow_clone(self.c_tensor);
+        torch.readAndCleanError();
+        return Tensor{ .c_tensor = c_tensor };
+    }
+
+    pub fn get(self: *const Tensor, idx: i64) Tensor {
+        const c_tensor = __c.at_get(self.c_tensor, idx);
+        torch.readAndCleanError();
+        return Tensor{ .c_tensor = c_tensor };
+    }
+
+    pub fn copy(self: *const Tensor, src: *const Tensor) void {
+        _ = __c.at_copy_(self.c_tensor, src.c_tensor);
+        torch.readAndCleanError();
+    }
+
+    pub fn load(path: []const u8) Tensor {
+        const c_path = torch.global_allocator.dupeZ(path);
+        defer torch.global_allocator.free(c_path);
+        const c_tensor = __c.at_load(c_path);
+        torch.readAndCleanError();
+        return Tensor{ .c_tensor = c_tensor };
+    }
+
+    pub fn save(self: *const Tensor, path: []const u8) void {
+        const c_path = torch.global_allocator.dupeZ(path);
+        defer torch.global_allocator.free(c_path);
+        __c.at_save(self.c_tensor, c_path);
+        torch.readAndCleanError();
+    }
+
+    pub fn toString(self: *const Tensor, lw: i64) []const u8 {
+        const s = __c.at_to_string(self.c_tensor, @intCast(lw));
+        torch.readAndCleanError();
+        return s;
     }
 };
