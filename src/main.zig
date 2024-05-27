@@ -3,7 +3,8 @@ const Tensor = torch.Tensor;
 const std = @import("std");
 const linear = @import("nn/linear.zig");
 const Identity = linear.Identity;
-
+const module = @import("nn/module.zig");
+const Module = module.Module;
 // TODO: Memory Management - Need to find a way to free tensors efficiently
 // NOTE: Every time a tensor is created I need to have a reference to it so that I can free it,
 // so basically my own memory management system, WELL SHIT!! Zig yay
@@ -29,7 +30,7 @@ pub fn add() void {
 pub fn main() !void {
     const cuda_available = torch.Cuda.isAvailable();
     std.debug.print("CUDA available: {}\n", .{cuda_available});
-    var size = [_]i64{ 2, 3 };
+    var size = [_]i64{ 3, 2 };
     var a = Tensor.rand(&size, torch.FLOAT_CUDA);
     a.print();
     a.select(0, 1).print();
@@ -44,10 +45,10 @@ pub fn main() !void {
     std.debug.print("Identity Layer: {any}\n", .{id});
     const n = id.name();
     std.debug.print("Name : {s}\n", .{n});
-    id.registerParameter("test", a, false);
-    id.registerParameter("bias", b, true);
+    _ = id.registerParameter("test", a, false);
+    _ = id.registerParameter("bias", b, true);
 
-    const map = try id.namedParameters(true);
+    const map = id.namedParameters(true);
 
     for (map.keys()) |key| {
         std.debug.print("Key: {s}\n", .{key});
@@ -63,7 +64,13 @@ pub fn main() !void {
     //     d.free();
     // }
     //
-    a.free();
+    defer a.free();
+
+    var fc = linear.Linear.init(linear.LinearOptions{ .in_features = 2, .out_features = 3 });
+    fc.to(a.device(), a.kind(), false);
+    defer fc.deinit();
+
+    fc.forward(&a).print();
 }
 
 test "leak" {

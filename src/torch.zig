@@ -21,6 +21,8 @@ pub const INT64_CUDA = TensorOptions{ .kind = Kind.Int64, .device = .{ .Cuda = 0
 
 pub var global_allocator: std.mem.Allocator = std.heap.raw_c_allocator;
 
+pub var grad_enabled: bool = true;
+
 pub fn setGlobalAllocator(allocator: std.mem.Allocator) void {
     global_allocator = allocator;
 }
@@ -115,9 +117,9 @@ pub const Device = union(enum) {
             -2 => Device.Mps,
             -3 => Device.Vulkan,
             else => if (v >= 0) {
-                Device.Cuda(@intCast(v));
+                return Device{ .Cuda = @intCast(v) };
             } else {
-                std.debug.err("Invalid device index: {}\n", .{v});
+                std.log.err("Invalid device index: {d}\n", .{v});
                 unreachable;
             },
         };
@@ -633,10 +635,25 @@ pub const COptimizer = struct {
     }
 };
 
-pub fn gradSetEnabled(enabled: bool) bool {
-    const ret = c.at_grad_set_enabled(enabled);
+pub const NoGradGuard = struct {
+    original_state: bool,
+    pub fn init() NoGradGuard {
+        gradSetEnabled(false);
+        grad_enabled = false;
+        return NoGradGuard{
+            .original_state = grad_enabled,
+        };
+    }
+
+    pub fn deinit(self: NoGradGuard) void {
+        gradSetEnabled(self.original_state);
+        grad_enabled = self.original_state;
+    }
+};
+
+pub fn gradSetEnabled(enabled: bool) void {
+    _ = c.at_grad_set_enabled(if (enabled) 1 else 0);
     readAndCleanError();
-    return ret != 0;
 }
 
 pub fn autocastClearCache() void {

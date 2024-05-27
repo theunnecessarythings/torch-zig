@@ -2,6 +2,7 @@ const torch = @import("torch");
 const Tensor = @import("torch").Tensor;
 const std = @import("std");
 const Module = @import("module.zig").Module;
+const ModuleGen = @import("module.zig").ModuleGen;
 const nn_init = @import("init.zig");
 
 pub const LinearOptions = struct {
@@ -50,21 +51,22 @@ pub const BilinearOptions = struct {
 };
 
 pub const Identity = struct {
-    children_: ?std.StringArrayHashMap(*Identity) = null,
-    parameters_: ?std.StringArrayHashMap(Tensor) = null,
-    buffers_: ?std.StringArrayHashMap(Tensor) = null,
+    children_: std.StringArrayHashMap(*Module) = undefined,
+    parameters_: std.StringArrayHashMap(Tensor) = undefined,
+    buffers_: std.StringArrayHashMap(Tensor) = undefined,
 
     const Self = @This();
-    const M = Module(Self);
+    const M = ModuleGen(Self);
     pub usingnamespace M;
 
     pub fn init() Self {
-        const self = Self{};
+        var self = Self{};
+        self.initFields();
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        _ = self;
+        self.deinitFields();
     }
 
     pub fn nameImpl(self: *const Self) []const u8 {
@@ -95,22 +97,23 @@ pub const Identity = struct {
 };
 
 pub const Linear = struct {
-    children_: ?std.StringArrayHashMap(*Linear) = null,
-    parameters_: ?std.StringArrayHashMap(Tensor) = null,
-    buffers_: ?std.StringArrayHashMap(Tensor) = null,
+    children_: std.StringArrayHashMap(*Module) = undefined,
+    parameters_: std.StringArrayHashMap(Tensor) = undefined,
+    buffers_: std.StringArrayHashMap(Tensor) = undefined,
 
     bias: ?Tensor = null,
     weight: Tensor = undefined,
-    options: LinearOptions = LinearOptions{},
+    options: LinearOptions = undefined,
 
     const Self = @This();
-    const M = Module(Self);
+    const M = ModuleGen(Self);
     pub usingnamespace M;
 
     pub fn init(options: LinearOptions) Self {
         var self = Self{
             .options = options,
         };
+        self.initFields();
         self.reset();
         return self;
     }
@@ -125,25 +128,25 @@ pub const Linear = struct {
 
     pub fn reset(self: *Self) void {
         var size = [_]i64{ self.options.out_features, self.options.in_features };
-        self.weight = self.registerParameter("weight", Tensor.empty(&size, self.tensor_opts));
+        self.weight = self.registerParameter("weight", Tensor.empty(&size, self.options.tensor_opts), true);
         if (self.options.bias) {
-            size = [_]i64{self.options.out_features};
-            self.bias = self.registerParameter("bias", Tensor.empty(&size, self.tensor_opts));
+            var size_ = [_]i64{self.options.out_features};
+            self.bias = self.registerParameter("bias", Tensor.empty(&size_, self.options.tensor_opts), true);
         }
         self.resetParameters();
     }
 
     pub fn resetParameters(self: *Self) void {
-        _ = nn_init.kaimingUniform_(self.weight, std.math.sqrt(5), .FanIn, .LeakyReLU);
+        _ = nn_init.kaimingUniform_(&self.weight, std.math.sqrt(5), .FanIn, .LeakyReLU);
         if (self.bias != null) {
-            const fan_in_out = nn_init.caclculateFanInAndFanOut(self.weight);
-            const bound = 1.0 / std.math.sqrt(fan_in_out[0]);
-            _ = nn_init.uniform_(self.bias.?, -bound, bound);
+            const fan_in_out = nn_init.caclculateFanInAndFanOut(&self.weight);
+            const bound = 1.0 / std.math.sqrt(@as(f64, @floatFromInt(fan_in_out[0])));
+            _ = nn_init.uniform_(&self.bias.?, -bound, bound);
         }
     }
 
     pub fn forward(self: *const Self, input: *const Tensor) Tensor {
-        return Tensor.linear(input, self.weight, self.bias);
+        return Tensor.linear(input, &self.weight, if (self.options.bias) &self.bias.? else null);
     }
 
     pub fn format(
@@ -164,25 +167,26 @@ pub const Linear = struct {
 };
 
 pub const Flatten = struct {
-    children_: ?std.StringArrayHashMap(*Flatten) = null,
-    parameters_: ?std.StringArrayHashMap(Tensor) = null,
-    buffers_: ?std.StringArrayHashMap(Tensor) = null,
+    children_: std.StringArrayHashMap(*Module) = undefined,
+    parameters_: std.StringArrayHashMap(Tensor) = undefined,
+    buffers_: std.StringArrayHashMap(Tensor) = undefined,
 
     options: FlattenOptions = FlattenOptions{},
 
     const Self = @This();
-    const M = Module(Self);
+    const M = ModuleGen(Self);
     pub usingnamespace M;
 
     pub fn init(options: FlattenOptions) Self {
-        const self = Self{
+        var self = Self{
             .options = options,
         };
+        self.initFields();
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        _ = self;
+        self.deinitFields();
     }
 
     pub fn reset() void {}
@@ -208,25 +212,26 @@ pub const Flatten = struct {
 };
 
 pub const Unflatten = struct {
-    children_: ?std.StringArrayHashMap(*Unflatten) = null,
-    parameters_: ?std.StringArrayHashMap(Tensor) = null,
-    buffers_: ?std.StringArrayHashMap(Tensor) = null,
+    children_: std.StringArrayHashMap(*Module) = undefined,
+    parameters_: std.StringArrayHashMap(Tensor) = undefined,
+    buffers_: std.StringArrayHashMap(Tensor) = undefined,
 
     options: UnflattenOptions = UnflattenOptions{},
 
     const Self = @This();
-    const M = Module(Self);
+    const M = ModuleGen(Self);
     pub usingnamespace M;
 
     pub fn init(options: UnflattenOptions) Self {
-        const self = Self{
+        var self = Self{
             .options = options,
         };
+        self.initFields();
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        _ = self;
+        self.deinitFields();
     }
 
     pub fn reset() void {}
@@ -262,15 +267,15 @@ pub const Unflatten = struct {
 };
 
 pub const Bilinear = struct {
-    children_: ?std.StringArrayHashMap(*Identity) = null,
-    parameters_: ?std.StringArrayHashMap(Tensor) = null,
-    buffers_: ?std.StringArrayHashMap(Tensor) = null,
+    children_: std.StringArrayHashMap(*Module) = undefined,
+    parameters_: std.StringArrayHashMap(Tensor) = undefined,
+    buffers_: std.StringArrayHashMap(Tensor) = undefined,
 
     bias: ?Tensor = null,
     weight: Tensor = undefined,
     options: BilinearOptions = BilinearOptions{},
     const Self = @This();
-    const M = Module(Self);
+    const M = ModuleGen(Self);
     pub usingnamespace M;
 
     pub fn init(options: BilinearOptions) Self {
@@ -309,22 +314,5 @@ pub const Bilinear = struct {
 
     pub fn forward(self: *const Self, input1: *const Tensor, input2: *const Tensor) Tensor {
         return Tensor.bilinear(input1, input2, self.weight, self.bias);
-    }
-
-    pub fn format(
-        self: Self,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
-        try writer.write(
-            "torch::nn::Bilinear(in1_features={d}, in2_features={d}, out_features={d}, bias={any})",
-            self.options.in1_features,
-            self.options.in2_features,
-            self.options.out_features,
-            self.options.bias,
-        );
     }
 };

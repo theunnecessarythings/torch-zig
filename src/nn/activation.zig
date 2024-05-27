@@ -2,6 +2,7 @@ const torch = @import("torch");
 const Tensor = @import("torch").Tensor;
 const std = @import("std");
 const Module = @import("module.zig").Module;
+const ModuleGen = @import("module.zig").ModuleGen;
 
 pub const ELUOptions = struct {
     alpha: f64 = 1.0,
@@ -104,15 +105,15 @@ pub const MultiheadAttentionOptions = struct {
 };
 
 pub const ELU = struct {
-    children_: ?std.StringArrayHashMap(*ELU) = null,
-    parameters_: ?std.StringArrayHashMap(Tensor) = null,
-    buffers_: ?std.StringArrayHashMap(Tensor) = null,
+    children_: std.StringArrayHashMap(*Module) = undefined,
+    parameters_: std.StringArrayHashMap(Tensor) = undefined,
+    buffers_: std.StringArrayHashMap(Tensor) = undefined,
 
     bias: ?Tensor = null,
     weight: Tensor = undefined,
     options: ELUOptions = ELUOptions{},
 
     const Self = @This();
-    const M = Module(Self);
+    const M = ModuleGen(Self);
     pub usingnamespace M;
 };

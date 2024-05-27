@@ -2,6 +2,7 @@ const std = @import("std");
 const torch = @import("torch");
 const Tensor = torch.Tensor;
 const Scalar = torch.Scalar;
+const NoGradGuard = torch.NoGradGuard;
 
 pub const NonlinearityType = enum {
     Linear,
@@ -30,40 +31,40 @@ pub const Fan = struct {
         const dims = tensor.dim();
         var in: i64 = 0;
         var out: i64 = 0;
-        if (dims >= 2) {
+        if (dims < 2) {
             @panic("Fan only supports tensors with 2 or more dimensions");
         }
         if (dims == 2) {
-            const size = tensor.size() catch unreachable;
+            const size = tensor.size();
             in = size[1];
             out = size[0];
         } else {
-            const size = tensor.size() catch unreachable;
-            in = size[1] * tensor.i(.{ 0, 0 }).numel();
-            out = size[0] * tensor.i(.{ 0, 0 }).numel();
+            const size = tensor.size();
+            in = size[1] * @as(i64, @intCast(tensor.i(.{ 0, 0 }).numel()));
+            out = size[0] * @as(i64, @intCast(tensor.i(.{ 0, 0 }).numel()));
         }
         return Fan{ .in = in, .out = out };
     }
 };
 
 fn calculateKaimingStd(
-    tensor: Tensor,
+    tensor: *Tensor,
     a: f64,
     mode: FanModeType,
     nonlinearity: NonlinearityType,
 ) f64 {
-    torch.gradSetEnabled(false);
-    defer torch.gradSetEnabled(true);
+    var guard = NoGradGuard.init();
+    defer guard.deinit();
 
-    const fan = Fan.init(&tensor);
+    const fan = Fan.init(tensor);
     const gain = calculateGain(nonlinearity, a);
     var stdev: f64 = 0.0;
     switch (mode) {
         .FanIn => {
-            stdev = gain / std.math.sqrt(fan.in);
+            stdev = gain / std.math.sqrt(@as(f64, @floatFromInt(fan.in)));
         },
         .FanOut => {
-            stdev = gain / std.math.sqrt(fan.out);
+            stdev = gain / std.math.sqrt(@as(f64, @floatFromInt(fan.out)));
         },
     }
     return stdev;
@@ -80,19 +81,20 @@ fn calculateGain(nonlinearity: NonlinearityType, param: f64) f64 {
         .LeakyReLU => {
             return std.math.sqrt(2.0 / (1.0 + param * param));
         },
+        else => unreachable,
     }
     return 1.0;
 }
 
 pub fn constant_(tensor: *Tensor, value: Scalar) Tensor {
-    torch.gradSetEnabled(false);
-    defer torch.gradSetEnabled(true);
+    var guard = NoGradGuard.init();
+    defer guard.deinit();
     return tensor.fill_(value);
 }
 
 pub fn dirac_(tensor: *Tensor) Tensor {
-    torch.gradSetEnabled(false);
-    defer torch.gradSetEnabled(true);
+    var guard = NoGradGuard.init();
+    defer guard.deinit();
     const size = tensor.size();
     if (size.len < 3 or tensor.len > 5) {
         std.log.err("Only tensors with 3, 4, or 5 dimensions are supported", .{});
@@ -118,8 +120,8 @@ pub fn dirac_(tensor: *Tensor) Tensor {
 }
 
 pub fn eye_(matrix: *Tensor) Tensor {
-    torch.gradSetEnabled(false);
-    defer torch.gradSetEnabled(true);
+    var guard = NoGradGuard.init();
+    defer guard.deinit();
     const size = matrix.size();
     if (size.len != 2) {
         std.log.err("Only tensors with 2 dimensions are supported", .{});
@@ -129,20 +131,20 @@ pub fn eye_(matrix: *Tensor) Tensor {
 }
 
 pub fn normal_(tensor: *Tensor, mean: f64, stdev: f64) Tensor {
-    torch.gradSetEnabled(false);
-    defer torch.gradSetEnabled(true);
+    var guard = NoGradGuard.init();
+    defer guard.deinit();
     return tensor.normal_(mean, stdev);
 }
 
 pub fn ones_(tensor: *Tensor) Tensor {
-    torch.gradSetEnabled(false);
-    defer torch.gradSetEnabled(true);
+    var guard = NoGradGuard.init();
+    defer guard.deinit();
     return tensor.fill_(1.0);
 }
 
 pub fn othogonal_(tensor: *Tensor, gain: f64) Tensor {
-    torch.gradSetEnabled(false);
-    defer torch.gradSetEnabled(true);
+    var guard = NoGradGuard.init();
+    defer guard.deinit();
 
     const size = tensor.size();
     if (size.len < 2) {
@@ -172,8 +174,8 @@ pub fn othogonal_(tensor: *Tensor, gain: f64) Tensor {
 }
 
 pub fn sparse_(tensor: *Tensor, sparsity: f64, stdev: f64) Tensor {
-    torch.gradSetEnabled(false);
-    defer torch.gradSetEnabled(true);
+    var guard = NoGradGuard.init();
+    defer guard.deinit();
 
     const size = tensor.size();
     if (size.len != 2) {
@@ -196,37 +198,37 @@ pub fn sparse_(tensor: *Tensor, sparsity: f64, stdev: f64) Tensor {
 }
 
 pub fn uniform_(tensor: *Tensor, low: f64, high: f64) Tensor {
-    torch.gradSetEnabled(false);
-    defer torch.gradSetEnabled(true);
+    var guard = NoGradGuard.init();
+    defer guard.deinit();
     return tensor.uniform_(low, high);
 }
 
 pub fn kaimingUniform_(tensor: *Tensor, a: f64, mode: FanModeType, nonlinearity: NonlinearityType) Tensor {
-    torch.gradSetEnabled(false);
-    defer torch.gradSetEnabled(true);
+    var guard = NoGradGuard.init();
+    defer guard.deinit();
     const stdev = calculateKaimingStd(tensor, a, mode, nonlinearity);
     const bound = std.math.sqrt(3.0) * stdev;
     return tensor.uniform_(-bound, bound);
 }
 
 pub fn kaimingNormal_(tensor: *Tensor, a: f64, mode: FanModeType, nonlinearity: NonlinearityType) Tensor {
-    torch.gradSetEnabled(false);
-    defer torch.gradSetEnabled(true);
+    var guard = NoGradGuard.init();
+    defer guard.deinit();
     const stdev = calculateKaimingStd(tensor, a, mode, nonlinearity);
     return tensor.normal_(0, stdev);
 }
 
 pub fn xavierNormal_(tensor: *Tensor, gain: f64) Tensor {
-    torch.gradSetEnabled(false);
-    defer torch.gradSetEnabled(true);
+    var guard = NoGradGuard.init();
+    defer guard.deinit();
     const fan = Fan.init(tensor);
     const stdev = gain * std.math.sqrt(2.0 / (fan.in + fan.out));
     return tensor.normal_(0, stdev);
 }
 
 pub fn xavierUniform_(tensor: *Tensor, gain: f64) Tensor {
-    torch.gradSetEnabled(false);
-    defer torch.gradSetEnabled(true);
+    var guard = NoGradGuard.init();
+    defer guard.deinit();
     const fan = Fan.init(tensor);
     const stdev = gain * std.math.sqrt(2.0 / (fan.in + fan.out));
     const a = std.math.sqrt(3.0) * stdev;
@@ -234,8 +236,8 @@ pub fn xavierUniform_(tensor: *Tensor, gain: f64) Tensor {
 }
 
 pub fn zeros_(tensor: *Tensor) Tensor {
-    torch.gradSetEnabled(false);
-    defer torch.gradSetEnabled(true);
+    var guard = NoGradGuard.init();
+    defer guard.deinit();
     return tensor.zero_();
 }
 
@@ -252,12 +254,12 @@ pub fn caclculateFanInAndFanOut(tensor: *const Tensor) [2]i64 {
     } else {
         const num_input_fmaps = size[1];
         const num_output_fmaps = size[0];
-        var receptive_field_size = 1;
+        var receptive_field_size: usize = 1;
         if (size.len > 2) {
             receptive_field_size = tensor.i(.{ 0, 0 }).numel();
         }
-        fan_in = num_input_fmaps * receptive_field_size;
-        fan_out = num_output_fmaps * receptive_field_size;
+        fan_in = num_input_fmaps * @as(i64, @intCast(receptive_field_size));
+        fan_out = num_output_fmaps * @as(i64, @intCast(receptive_field_size));
     }
     return [2]i64{ fan_in, fan_out };
 }

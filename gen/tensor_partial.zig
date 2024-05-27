@@ -94,17 +94,17 @@ pub const Tensor = struct {
                 n_newaxis += 1;
             }
         }
-
-        if (index_spec.len > self.size().len + n_newaxis) {
-            std.log.err("too many indices for tensor of dimension {d}", .{self.size().len});
+        const dim_ = self.dim();
+        if (index_spec.len > dim_ + n_newaxis) {
+            std.log.err("too many indices for tensor of dimension {d}", .{dim_});
             unreachable;
         }
 
         for (index_spec) |spec| {
             switch (spec) {
                 .IndexSelect => |tensor| {
-                    if (tensor.size().len != 1) {
-                        std.log.err("expected 1-d tensor, got {}", .{tensor.size().len});
+                    if (dim_ != 1) {
+                        std.log.err("expected 1-d tensor, got {}", .{dim_});
                         unreachable;
                     }
 
@@ -179,15 +179,11 @@ pub const Tensor = struct {
     }
 
     pub fn size(self: *const Tensor) []i64 {
-        const dim_ = __c.at_dim(self.c_tensor);
+        const dim_ = self.dim();
+        var buffer: [10]i64 = undefined;
+        __c.at_shape(self.c_tensor, buffer[0..dim_].ptr);
         torch.readAndCleanError();
-        var sz = std.ArrayList(i64).init(torch.global_allocator);
-        sz.resize(dim_) catch unreachable;
-        const items = torch.global_allocator.dupeZ(i64, sz.items) catch unreachable;
-        defer torch.global_allocator.free(items);
-        __c.at_shape(self.c_tensor, items);
-        torch.readAndCleanError();
-        return sz.toOwnedSlice() catch unreachable;
+        return buffer[0..dim_];
     }
 
     pub fn sizeDims(self: *const Tensor, comptime dims: usize) ![dims]i64 {

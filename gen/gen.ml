@@ -599,7 +599,7 @@ module Func = struct
         Printf.sprintf "%s.ptr, @intCast(%s.len)" name name
       | TensorOptList -> Printf.sprintf "ptrListOpt(%s).ptr, @intCast(%s.len)" name name
       | TensorList -> Printf.sprintf "ptrList(%s).ptr, @intCast(%s.len)" name name
-      | TensorOption -> Printf.sprintf "%s orelse null" name
+      | TensorOption -> Printf.sprintf "if (%s != null) %s.?.c_tensor else null" name name
       | Int64 when String.( = ) name "reduction" -> "reduction.to_int()"
       | Layout -> Printf.sprintf "%s.toI8()" name
       | LayoutOption -> Printf.sprintf "%s orelse - 1" name
