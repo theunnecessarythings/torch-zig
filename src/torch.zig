@@ -6,6 +6,8 @@ const c = @cImport({
     @cInclude("torch_api.h");
     @cInclude("torch_api_generated.h");
 });
+
+pub const utils = @import("utils.zig");
 // TODO: we don't have the error generating/fallible functions right now, probably need
 // // to add them for usecases where fallback is needed instead of panic
 pub const Tensor = @import("tensor.zig").Tensor;
@@ -42,15 +44,13 @@ pub const TensorPool = struct {
 
     pub fn removePool(self: *TensorPool, name: []const u8) void {
         self.pool.swapRemove(name) catch {
-            std.log.err("Failed to remove pool: {}\n", .{name});
-            unreachable;
+            @panic("Failed to remove pool");
         };
     }
 
     pub fn freePool(self: *TensorPool, name: []const u8) void {
         var pool = self.pool.get(name) orelse {
-            std.log.err("Failed to get pool: {}\n", .{name});
-            unreachable;
+            @panic("Failed to get pool");
         };
         for (pool.items) |tensor| {
             tensor.free();
@@ -79,19 +79,16 @@ pub const TensorPool = struct {
             self.addPool(name);
         };
         pool.append(tensor) catch {
-            std.log.err("Failed to append tensor to pool: {}\n", .{name});
-            unreachable;
+            @panic("Failed to append tensor to pool");
         };
     }
 
     pub fn put(self: *TensorPool, tensor: Tensor) void {
         var pool = self.pool.get("default") orelse {
-            std.log.err("Failed to get default pool\n");
-            unreachable;
+            @panic("Failed to get default pool");
         };
         pool.append(tensor) catch {
-            std.log.err("Failed to append tensor to default pool\n");
-            unreachable;
+            @panic("Failed to append tensor to default pool");
         };
     }
 };
@@ -119,8 +116,7 @@ pub const Device = union(enum) {
             else => if (v >= 0) {
                 return Device{ .Cuda = @intCast(v) };
             } else {
-                std.log.err("Invalid device index: {d}\n", .{v});
-                unreachable;
+                @panic("Invalid device index");
             },
         };
     }
@@ -237,8 +233,7 @@ pub const Kind = enum {
             14 => Kind.QInt32,
             15 => Kind.BFloat16,
             else => {
-                std.log.err("Invalid kind: {}\n", .{v});
-                unreachable;
+                @panic("Invalid kind");
             },
         };
     }

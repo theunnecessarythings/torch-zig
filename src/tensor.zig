@@ -646,11 +646,11 @@ pub const Tensor = struct {
     }
 
     pub fn internalAdaptiveAvgPool2d(
-        self: *const Tensor, output_size: []i64
+        self: *const Tensor, output_size: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__adaptive_avg_pool2d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -677,22 +677,22 @@ pub const Tensor = struct {
     }
 
     pub fn internalAdaptiveAvgPool2dOut(
-        self: *const Tensor, out: *const Tensor, output_size: []i64
+        self: *const Tensor, out: *const Tensor, output_size: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__adaptive_avg_pool2d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalAdaptiveAvgPool3d(
-        self: *const Tensor, output_size: []i64
+        self: *const Tensor, output_size: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__adaptive_avg_pool3d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -719,12 +719,12 @@ pub const Tensor = struct {
     }
 
     pub fn internalAdaptiveAvgPool3dOut(
-        self: *const Tensor, out: *const Tensor, output_size: []i64
+        self: *const Tensor, out: *const Tensor, output_size: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__adaptive_avg_pool3d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -918,7 +918,7 @@ pub const Tensor = struct {
         self_scalar: Scalar, assert_msg: []const u8
     ) void {
         __c.atg__assert_scalar(self_scalar.into().c_scalar,
-                assert_msg.ptr, assert_msg.len);
+                @constCast(assert_msg.ptr), @intCast(assert_msg.len));
         torch.readAndCleanError();
         return;
     }
@@ -927,8 +927,8 @@ pub const Tensor = struct {
         a: *const Tensor, size_: ?[]i64, stride_: ?[]i64, dtype: ?Kind
     ) void {
         __c.atg__assert_tensor_metadata(a.c_tensor,
-                size_.ptr, @intCast(size_.len),
-                stride_.ptr, @intCast(stride_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
                 dtype orelse -1);
         torch.readAndCleanError();
         return;
@@ -1230,32 +1230,32 @@ pub const Tensor = struct {
     }
 
     pub fn internalConvDepthwise2d(
-        self: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64
+        self: *const Tensor, weight: *const Tensor, kernel_size: []const i64, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__conv_depthwise2d(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len));
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalConvDepthwise2dOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []const i64, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__conv_depthwise2d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len));
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -1319,17 +1319,17 @@ pub const Tensor = struct {
     }
 
     pub fn internalConvolution(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64, benchmark: bool, deterministic: bool, cudnn_enabled: bool, allow_tf32: bool
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64, transposed: bool, output_padding: []const i64, groups: i64, benchmark: bool, deterministic: bool, cudnn_enabled: bool, allow_tf32: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__convolution(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (transposed)  1  else  0,
-                output_padding.ptr, @intCast(output_padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
                 groups,
                 if (benchmark)  1  else  0,
                 if (deterministic)  1  else  0,
@@ -1340,17 +1340,17 @@ pub const Tensor = struct {
     }
 
     pub fn internalConvolutionDeprecated(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64, benchmark: bool, deterministic: bool, cudnn_enabled: bool
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64, transposed: bool, output_padding: []const i64, groups: i64, benchmark: bool, deterministic: bool, cudnn_enabled: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__convolution_deprecated(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (transposed)  1  else  0,
-                output_padding.ptr, @intCast(output_padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
                 groups,
                 if (benchmark)  1  else  0,
                 if (deterministic)  1  else  0,
@@ -1360,33 +1360,33 @@ pub const Tensor = struct {
     }
 
     pub fn internalConvolutionMode(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []const u8, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const u8, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__convolution_mode(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, padding.len,
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalConvolutionOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64, benchmark: bool, deterministic: bool, cudnn_enabled: bool, allow_tf32: bool
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64, transposed: bool, output_padding: []const i64, groups: i64, benchmark: bool, deterministic: bool, cudnn_enabled: bool, allow_tf32: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__convolution_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (transposed)  1  else  0,
-                output_padding.ptr, @intCast(output_padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
                 groups,
                 if (benchmark)  1  else  0,
                 if (deterministic)  1  else  0,
@@ -1478,13 +1478,13 @@ pub const Tensor = struct {
     }
 
     pub fn internalCtcLoss(
-        log_probs: *const Tensor, targets: *const Tensor, input_lengths: []i64, target_lengths: []i64, blank: i64, zero_infinity: bool
+        log_probs: *const Tensor, targets: *const Tensor, input_lengths: []const i64, target_lengths: []const i64, blank: i64, zero_infinity: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__ctc_loss(@ptrCast(&c_tensors), log_probs.c_tensor,
                 targets.c_tensor,
-                input_lengths.ptr, @intCast(input_lengths.len),
-                target_lengths.ptr, @intCast(target_lengths.len),
+                @constCast(input_lengths.ptr), @intCast(input_lengths.len),
+                @constCast(target_lengths.ptr), @intCast(target_lengths.len),
                 blank,
                 if (zero_infinity)  1  else  0);
         torch.readAndCleanError();
@@ -1492,14 +1492,14 @@ pub const Tensor = struct {
     }
 
     pub fn internalCtcLossBackward(
-        gradient: *const Tensor, log_probs: *const Tensor, targets: *const Tensor, input_lengths: []i64, target_lengths: []i64, neg_log_likelihood: *const Tensor, log_alpha: *const Tensor, blank: i64, zero_infinity: bool
+        gradient: *const Tensor, log_probs: *const Tensor, targets: *const Tensor, input_lengths: []const i64, target_lengths: []const i64, neg_log_likelihood: *const Tensor, log_alpha: *const Tensor, blank: i64, zero_infinity: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__ctc_loss_backward(@ptrCast(&c_tensors), gradient.c_tensor,
                 log_probs.c_tensor,
                 targets.c_tensor,
-                input_lengths.ptr, @intCast(input_lengths.len),
-                target_lengths.ptr, @intCast(target_lengths.len),
+                @constCast(input_lengths.ptr), @intCast(input_lengths.len),
+                @constCast(target_lengths.ptr), @intCast(target_lengths.len),
                 neg_log_likelihood.c_tensor,
                 log_alpha.c_tensor,
                 blank,
@@ -1509,15 +1509,15 @@ pub const Tensor = struct {
     }
 
     pub fn internalCtcLossBackwardOut(
-        out: *const Tensor, gradient: *const Tensor, log_probs: *const Tensor, targets: *const Tensor, input_lengths: []i64, target_lengths: []i64, neg_log_likelihood: *const Tensor, log_alpha: *const Tensor, blank: i64, zero_infinity: bool
+        out: *const Tensor, gradient: *const Tensor, log_probs: *const Tensor, targets: *const Tensor, input_lengths: []const i64, target_lengths: []const i64, neg_log_likelihood: *const Tensor, log_alpha: *const Tensor, blank: i64, zero_infinity: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__ctc_loss_backward_out(@ptrCast(&c_tensors), out.c_tensor,
                 gradient.c_tensor,
                 log_probs.c_tensor,
                 targets.c_tensor,
-                input_lengths.ptr, @intCast(input_lengths.len),
-                target_lengths.ptr, @intCast(target_lengths.len),
+                @constCast(input_lengths.ptr), @intCast(input_lengths.len),
+                @constCast(target_lengths.ptr), @intCast(target_lengths.len),
                 neg_log_likelihood.c_tensor,
                 log_alpha.c_tensor,
                 blank,
@@ -1544,15 +1544,15 @@ pub const Tensor = struct {
     }
 
     pub fn internalCtcLossOut(
-        out0: *const Tensor, out1: *const Tensor, log_probs: *const Tensor, targets: *const Tensor, input_lengths: []i64, target_lengths: []i64, blank: i64, zero_infinity: bool
+        out0: *const Tensor, out1: *const Tensor, log_probs: *const Tensor, targets: *const Tensor, input_lengths: []const i64, target_lengths: []const i64, blank: i64, zero_infinity: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__ctc_loss_out(@ptrCast(&c_tensors), out0.c_tensor,
                 out1.c_tensor,
                 log_probs.c_tensor,
                 targets.c_tensor,
-                input_lengths.ptr, @intCast(input_lengths.len),
-                target_lengths.ptr, @intCast(target_lengths.len),
+                @constCast(input_lengths.ptr), @intCast(input_lengths.len),
+                @constCast(target_lengths.ptr), @intCast(target_lengths.len),
                 blank,
                 if (zero_infinity)  1  else  0);
         torch.readAndCleanError();
@@ -1590,13 +1590,13 @@ pub const Tensor = struct {
     }
 
     pub fn internalCudnnCtcLoss(
-        log_probs: *const Tensor, targets: *const Tensor, input_lengths: []i64, target_lengths: []i64, blank: i64, deterministic: bool, zero_infinity: bool
+        log_probs: *const Tensor, targets: *const Tensor, input_lengths: []const i64, target_lengths: []const i64, blank: i64, deterministic: bool, zero_infinity: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__cudnn_ctc_loss(@ptrCast(&c_tensors), log_probs.c_tensor,
                 targets.c_tensor,
-                input_lengths.ptr, @intCast(input_lengths.len),
-                target_lengths.ptr, @intCast(target_lengths.len),
+                @constCast(input_lengths.ptr), @intCast(input_lengths.len),
+                @constCast(target_lengths.ptr), @intCast(target_lengths.len),
                 blank,
                 if (deterministic)  1  else  0,
                 if (zero_infinity)  1  else  0);
@@ -1605,15 +1605,15 @@ pub const Tensor = struct {
     }
 
     pub fn internalCudnnCtcLossOut(
-        out0: *const Tensor, out1: *const Tensor, log_probs: *const Tensor, targets: *const Tensor, input_lengths: []i64, target_lengths: []i64, blank: i64, deterministic: bool, zero_infinity: bool
+        out0: *const Tensor, out1: *const Tensor, log_probs: *const Tensor, targets: *const Tensor, input_lengths: []const i64, target_lengths: []const i64, blank: i64, deterministic: bool, zero_infinity: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__cudnn_ctc_loss_out(@ptrCast(&c_tensors), out0.c_tensor,
                 out1.c_tensor,
                 log_probs.c_tensor,
                 targets.c_tensor,
-                input_lengths.ptr, @intCast(input_lengths.len),
-                target_lengths.ptr, @intCast(target_lengths.len),
+                @constCast(input_lengths.ptr), @intCast(input_lengths.len),
+                @constCast(target_lengths.ptr), @intCast(target_lengths.len),
                 blank,
                 if (deterministic)  1  else  0,
                 if (zero_infinity)  1  else  0);
@@ -1661,7 +1661,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCudnnRnn(
-        self: *const Tensor, weight: []*const Tensor, weight_stride0: i64, weight_buf: ?*const Tensor, hx: *const Tensor, cx: ?*const Tensor, mode_: i64, hidden_size: i64, proj_size: i64, num_layers: i64, batch_first: bool, dropout_: f64, train: bool, bidirectional: bool, batch_sizes: []i64, dropout_state: ?*const Tensor
+        self: *const Tensor, weight: []*const Tensor, weight_stride0: i64, weight_buf: ?*const Tensor, hx: *const Tensor, cx: ?*const Tensor, mode_: i64, hidden_size: i64, proj_size: i64, num_layers: i64, batch_first: bool, dropout_: f64, train: bool, bidirectional: bool, batch_sizes: []const i64, dropout_state: ?*const Tensor
     ) [5]Tensor {
         var c_tensors = [_]C_tensor{null} ** 5;
         __c.atg__cudnn_rnn(@ptrCast(&c_tensors), self.c_tensor,
@@ -1678,7 +1678,7 @@ pub const Tensor = struct {
                 dropout_,
                 if (train)  1  else  0,
                 if (bidirectional)  1  else  0,
-                batch_sizes.ptr, @intCast(batch_sizes.len),
+                @constCast(batch_sizes.ptr), @intCast(batch_sizes.len),
                 if (dropout_state != null) dropout_state.?.c_tensor else null);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }, Tensor { .c_tensor = c_tensors[3] }, Tensor { .c_tensor = c_tensors[4] }};
@@ -1720,7 +1720,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalCudnnRnnOut(
-        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, out3: *const Tensor, out4: *const Tensor, weight: []*const Tensor, weight_stride0: i64, weight_buf: ?*const Tensor, hx: *const Tensor, cx: ?*const Tensor, mode_: i64, hidden_size: i64, proj_size: i64, num_layers: i64, batch_first: bool, dropout_: f64, train: bool, bidirectional: bool, batch_sizes: []i64, dropout_state: ?*const Tensor
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, out3: *const Tensor, out4: *const Tensor, weight: []*const Tensor, weight_stride0: i64, weight_buf: ?*const Tensor, hx: *const Tensor, cx: ?*const Tensor, mode_: i64, hidden_size: i64, proj_size: i64, num_layers: i64, batch_first: bool, dropout_: f64, train: bool, bidirectional: bool, batch_sizes: []const i64, dropout_state: ?*const Tensor
     ) [5]Tensor {
         var c_tensors = [_]C_tensor{null} ** 5;
         __c.atg__cudnn_rnn_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -1742,7 +1742,7 @@ pub const Tensor = struct {
                 dropout_,
                 if (train)  1  else  0,
                 if (bidirectional)  1  else  0,
-                batch_sizes.ptr, @intCast(batch_sizes.len),
+                @constCast(batch_sizes.ptr), @intCast(batch_sizes.len),
                 if (dropout_state != null) dropout_state.?.c_tensor else null);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }, Tensor { .c_tensor = c_tensors[3] }, Tensor { .c_tensor = c_tensors[4] }};
@@ -1825,28 +1825,28 @@ pub const Tensor = struct {
                 philox_offset.c_tensor,
                 custom_mask_type,
                 if (bias_requires_grad)  1  else  0,
-                scale orelse std.math.nan, (scale == null),
-                num_splits_key orelse 0, (num_splits_key == null));
+                scale orelse std.math.nan(f64), @intFromBool(scale == null),
+                num_splits_key orelse 0, @intFromBool(num_splits_key == null));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }, Tensor { .c_tensor = c_tensors[3] }};
     }
 
     pub fn internalEfficientzerotensor(
-        size_: []i64, options_: TensorOptions
+        size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg__efficientzerotensor(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
+        __c.atg__efficientzerotensor(@ptrCast(&c_tensors), @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalEfficientzerotensorOut(
-        out: *const Tensor, size_: []i64
+        out: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__efficientzerotensor_out(@ptrCast(&c_tensors), out.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -2034,10 +2034,10 @@ pub const Tensor = struct {
     }
 
     pub fn internalEmptyAffineQuantized(
-        size_: []i64, options_: TensorOptions, scale: f64, zero_point: i64
+        size_: []const i64, options_: TensorOptions, scale: f64, zero_point: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg__empty_affine_quantized(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
+        __c.atg__empty_affine_quantized(@ptrCast(&c_tensors), @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt(),
                 scale,
                 zero_point);
@@ -2046,11 +2046,11 @@ pub const Tensor = struct {
     }
 
     pub fn internalEmptyAffineQuantizedOut(
-        out: *const Tensor, size_: []i64, scale: f64, zero_point: i64
+        out: *const Tensor, size_: []const i64, scale: f64, zero_point: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__empty_affine_quantized_out(@ptrCast(&c_tensors), out.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 scale,
                 zero_point);
         torch.readAndCleanError();
@@ -2058,10 +2058,10 @@ pub const Tensor = struct {
     }
 
     pub fn internalEmptyPerChannelAffineQuantized(
-        size_: []i64, scales: *const Tensor, zero_points: *const Tensor, axis: i64, options_: TensorOptions
+        size_: []const i64, scales: *const Tensor, zero_points: *const Tensor, axis: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg__empty_per_channel_affine_quantized(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
+        __c.atg__empty_per_channel_affine_quantized(@ptrCast(&c_tensors), @constCast(size_.ptr), @intCast(size_.len),
                 scales.c_tensor,
                 zero_points.c_tensor,
                 axis,
@@ -2071,11 +2071,11 @@ pub const Tensor = struct {
     }
 
     pub fn internalEmptyPerChannelAffineQuantizedOut(
-        out: *const Tensor, size_: []i64, scales: *const Tensor, zero_points: *const Tensor, axis: i64
+        out: *const Tensor, size_: []const i64, scales: *const Tensor, zero_points: *const Tensor, axis: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__empty_per_channel_affine_quantized_out(@ptrCast(&c_tensors), out.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 scales.c_tensor,
                 zero_points.c_tensor,
                 axis);
@@ -2226,11 +2226,11 @@ pub const Tensor = struct {
     }
 
     pub fn internalFftC2c(
-        self: *const Tensor, dim_: []i64, normalization: i64, forward: bool
+        self: *const Tensor, dim_: []const i64, normalization: i64, forward: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__fft_c2c(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 normalization,
                 if (forward)  1  else  0);
         torch.readAndCleanError();
@@ -2238,12 +2238,12 @@ pub const Tensor = struct {
     }
 
     pub fn internalFftC2cOut(
-        self: *const Tensor, out: *const Tensor, dim_: []i64, normalization: i64, forward: bool
+        self: *const Tensor, out: *const Tensor, dim_: []const i64, normalization: i64, forward: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__fft_c2c_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 normalization,
                 if (forward)  1  else  0);
         torch.readAndCleanError();
@@ -2251,11 +2251,11 @@ pub const Tensor = struct {
     }
 
     pub fn internalFftC2r(
-        self: *const Tensor, dim_: []i64, normalization: i64, last_dim_size: i64
+        self: *const Tensor, dim_: []const i64, normalization: i64, last_dim_size: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__fft_c2r(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 normalization,
                 last_dim_size);
         torch.readAndCleanError();
@@ -2263,12 +2263,12 @@ pub const Tensor = struct {
     }
 
     pub fn internalFftC2rOut(
-        self: *const Tensor, out: *const Tensor, dim_: []i64, normalization: i64, last_dim_size: i64
+        self: *const Tensor, out: *const Tensor, dim_: []const i64, normalization: i64, last_dim_size: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__fft_c2r_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 normalization,
                 last_dim_size);
         torch.readAndCleanError();
@@ -2276,11 +2276,11 @@ pub const Tensor = struct {
     }
 
     pub fn internalFftR2c(
-        self: *const Tensor, dim_: []i64, normalization: i64, onesided: bool
+        self: *const Tensor, dim_: []const i64, normalization: i64, onesided: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__fft_r2c(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 normalization,
                 if (onesided)  1  else  0);
         torch.readAndCleanError();
@@ -2288,12 +2288,12 @@ pub const Tensor = struct {
     }
 
     pub fn internalFftR2cOut(
-        self: *const Tensor, out: *const Tensor, dim_: []i64, normalization: i64, onesided: bool
+        self: *const Tensor, out: *const Tensor, dim_: []const i64, normalization: i64, onesided: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__fft_r2c_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 normalization,
                 if (onesided)  1  else  0);
         torch.readAndCleanError();
@@ -2330,7 +2330,7 @@ pub const Tensor = struct {
                 if (is_causal)  1  else  0,
                 philox_seed.c_tensor,
                 philox_offset.c_tensor,
-                scale orelse std.math.nan, (scale == null));
+                scale orelse std.math.nan(f64), @intFromBool(scale == null));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }};
     }
@@ -2365,7 +2365,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__functional_assert_async(@ptrCast(&c_tensors), self.c_tensor,
-                assert_msg.ptr, assert_msg.len,
+                @constCast(assert_msg.ptr), @intCast(assert_msg.len),
                 dep_token.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -2376,7 +2376,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__functional_assert_scalar(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
-                assert_msg.ptr, assert_msg.len,
+                @constCast(assert_msg.ptr), @intCast(assert_msg.len),
                 dep_token.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -2387,8 +2387,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__functional_sym_constrain_range(@ptrCast(&c_tensors), size_.into().c_scalar,
-                min_ orelse 0, (min_ == null),
-                max_ orelse 0, (max_ == null),
+                min_ orelse 0, @intFromBool(min_ == null),
+                max_ orelse 0, @intFromBool(max_ == null),
                 dep_token.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -2399,8 +2399,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__functional_sym_constrain_range_for_size(@ptrCast(&c_tensors), size_.into().c_scalar,
-                min_ orelse 0, (min_ == null),
-                max_ orelse 0, (max_ == null),
+                min_ orelse 0, @intFromBool(min_ == null),
+                max_ orelse 0, @intFromBool(max_ == null),
                 dep_token.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -2502,7 +2502,7 @@ pub const Tensor = struct {
                 if (attn_mask != null) attn_mask.?.c_tensor else null,
                 dropout_p,
                 if (is_causal)  1  else  0,
-                scale orelse std.math.nan, (scale == null));
+                scale orelse std.math.nan(f64), @intFromBool(scale == null));
        torch.readAndCleanError();
         return return_;
     }
@@ -2610,11 +2610,11 @@ pub const Tensor = struct {
     }
 
     pub fn internalHistogramddBinEdges(
-        self: *const Tensor, bins: []i64, range_: []f64, weight: ?*const Tensor, density: bool
+        self: *const Tensor, bins: []const i64, range_: []f64, weight: ?*const Tensor, density: bool
     ) []Tensor {
         const c_tensors = __c.atg__histogramdd_bin_edges(self.c_tensor,
-                bins.ptr, @intCast(bins.len),
-                range_.ptr, @intCast(range_.len),
+                @constCast(bins.ptr), @intCast(bins.len),
+                @constCast(range_.ptr), @intCast(range_.len),
                 if (weight != null) weight.?.c_tensor else null,
                 if (density)  1  else  0);
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
@@ -2629,12 +2629,12 @@ pub const Tensor = struct {
     }
 
     pub fn internalHistogramddBinEdgesOut(
-        self: *const Tensor, out: []*const Tensor, bins: []i64, range_: []f64, weight: ?*const Tensor, density: bool
+        self: *const Tensor, out: []*const Tensor, bins: []const i64, range_: []f64, weight: ?*const Tensor, density: bool
     ) void {
         __c.atg__histogramdd_bin_edges_out(ptrList(out).ptr, @intCast(out.len),
                 self.c_tensor,
-                bins.ptr, @intCast(bins.len),
-                range_.ptr, @intCast(range_.len),
+                @constCast(bins.ptr), @intCast(bins.len),
+                @constCast(range_.ptr), @intCast(range_.len),
                 if (weight != null) weight.?.c_tensor else null,
                 if (density)  1  else  0);
         torch.readAndCleanError();
@@ -2642,12 +2642,12 @@ pub const Tensor = struct {
     }
 
     pub fn internalHistogramddFromBinCts(
-        self: *const Tensor, bins: []i64, range_: []f64, weight: ?*const Tensor, density: bool
+        self: *const Tensor, bins: []const i64, range_: []f64, weight: ?*const Tensor, density: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__histogramdd_from_bin_cts(@ptrCast(&c_tensors), self.c_tensor,
-                bins.ptr, @intCast(bins.len),
-                range_.ptr, @intCast(range_.len),
+                @constCast(bins.ptr), @intCast(bins.len),
+                @constCast(range_.ptr), @intCast(range_.len),
                 if (weight != null) weight.?.c_tensor else null,
                 if (density)  1  else  0);
         torch.readAndCleanError();
@@ -2655,13 +2655,13 @@ pub const Tensor = struct {
     }
 
     pub fn internalHistogramddFromBinCtsOut(
-        self: *const Tensor, out: *const Tensor, bins: []i64, range_: []f64, weight: ?*const Tensor, density: bool
+        self: *const Tensor, out: *const Tensor, bins: []const i64, range_: []f64, weight: ?*const Tensor, density: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__histogramdd_from_bin_cts_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                bins.ptr, @intCast(bins.len),
-                range_.ptr, @intCast(range_.len),
+                @constCast(bins.ptr), @intCast(bins.len),
+                @constCast(range_.ptr), @intCast(range_.len),
                 if (weight != null) weight.?.c_tensor else null,
                 if (density)  1  else  0);
         torch.readAndCleanError();
@@ -2821,7 +2821,7 @@ pub const Tensor = struct {
         info: *const Tensor, api_name: []const u8, is_matrix: bool
     ) void {
         __c.atg__linalg_check_errors(info.c_tensor,
-                api_name.ptr, api_name.len,
+                @constCast(api_name.ptr), @intCast(api_name.len),
                 if (is_matrix)  1  else  0);
         torch.readAndCleanError();
         return;
@@ -2853,7 +2853,7 @@ pub const Tensor = struct {
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__linalg_eigh(@ptrCast(&c_tensors), a.c_tensor,
-                uplo.ptr, uplo.len,
+                @constCast(uplo.ptr), @intCast(uplo.len),
                 if (compute_v)  1  else  0);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
@@ -2866,7 +2866,7 @@ pub const Tensor = struct {
         __c.atg__linalg_eigh_eigenvalues(@ptrCast(&c_tensors), eigenvalues.c_tensor,
                 eigenvectors.c_tensor,
                 a.c_tensor,
-                uplo.ptr, uplo.len,
+                @constCast(uplo.ptr), @intCast(uplo.len),
                 if (compute_v)  1  else  0);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
@@ -2938,7 +2938,7 @@ pub const Tensor = struct {
         __c.atg__linalg_svd(@ptrCast(&c_tensors), a.c_tensor,
                 if (full_matrices)  1  else  0,
                 if (compute_uv)  1  else  0,
-                driver.ptr, driver.len);
+                @constCast(driver.ptr), @intCast(driver.len));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }};
     }
@@ -2953,7 +2953,7 @@ pub const Tensor = struct {
                 a.c_tensor,
                 if (full_matrices)  1  else  0,
                 if (compute_uv)  1  else  0,
-                driver.ptr, driver.len);
+                @constCast(driver.ptr), @intCast(driver.len));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }};
     }
@@ -3198,8 +3198,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__masked_softmax(@ptrCast(&c_tensors), self.c_tensor,
                 mask.c_tensor,
-                dim_ orelse 0, (dim_ == null),
-                mask_type orelse 0, (mask_type == null));
+                dim_ orelse 0, @intFromBool(dim_ == null),
+                mask_type orelse 0, @intFromBool(mask_type == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -3211,7 +3211,7 @@ pub const Tensor = struct {
         __c.atg__masked_softmax_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 output.c_tensor,
                 mask.c_tensor,
-                dim_ orelse 0, (dim_ == null));
+                dim_ orelse 0, @intFromBool(dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -3224,7 +3224,7 @@ pub const Tensor = struct {
                 grad_output.c_tensor,
                 output.c_tensor,
                 mask.c_tensor,
-                dim_ orelse 0, (dim_ == null));
+                dim_ orelse 0, @intFromBool(dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -3236,8 +3236,8 @@ pub const Tensor = struct {
         __c.atg__masked_softmax_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 mask.c_tensor,
-                dim_ orelse 0, (dim_ == null),
-                mask_type orelse 0, (mask_type == null));
+                dim_ orelse 0, @intFromBool(dim_ == null),
+                mask_type orelse 0, @intFromBool(mask_type == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -3250,28 +3250,28 @@ pub const Tensor = struct {
                 weight.c_tensor,
                 scale.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                activation.ptr, activation.len);
+                @constCast(activation.ptr), @intCast(activation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalMkldnnReshape(
-        self: *const Tensor, shape: []i64
+        self: *const Tensor, shape: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__mkldnn_reshape(@ptrCast(&c_tensors), self.c_tensor,
-                shape.ptr, @intCast(shape.len));
+                @constCast(shape.ptr), @intCast(shape.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalMkldnnReshapeOut(
-        self: *const Tensor, out: *const Tensor, shape: []i64
+        self: *const Tensor, out: *const Tensor, shape: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__mkldnn_reshape_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                shape.ptr, @intCast(shape.len));
+                @constCast(shape.ptr), @intCast(shape.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -3311,62 +3311,62 @@ pub const Tensor = struct {
     }
 
     pub fn internalMpsConvolution(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__mps_convolution(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalMpsConvolutionOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__mps_convolution_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalMpsConvolutionTranspose(
-        self: *const Tensor, weight: *const Tensor, padding: []i64, output_padding: []i64, stride_: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, padding: []const i64, output_padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__mps_convolution_transpose(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
-                padding.ptr, @intCast(padding.len),
-                output_padding.ptr, @intCast(output_padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalMpsConvolutionTransposeOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, padding: []i64, output_padding: []i64, stride_: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, padding: []const i64, output_padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__mps_convolution_transpose_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
-                padding.ptr, @intCast(padding.len),
-                output_padding.ptr, @intCast(output_padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -3503,7 +3503,7 @@ pub const Tensor = struct {
                 if (mask != null) mask.?.c_tensor else null,
                 if (need_weights)  1  else  0,
                 if (average_attn_weights)  1  else  0,
-                mask_type orelse 0, (mask_type == null));
+                mask_type orelse 0, @intFromBool(mask_type == null));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
@@ -3526,7 +3526,7 @@ pub const Tensor = struct {
                 if (mask != null) mask.?.c_tensor else null,
                 if (need_weights)  1  else  0,
                 if (average_attn_weights)  1  else  0,
-                mask_type orelse 0, (mask_type == null));
+                mask_type orelse 0, @intFromBool(mask_type == null));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
@@ -3684,7 +3684,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nested_sum_backward(@ptrCast(&c_tensors), gradient.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -3799,28 +3799,28 @@ pub const Tensor = struct {
     }
 
     pub fn internalNnpackSpatialConvolution(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []const i64, stride_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nnpack_spatial_convolution(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len));
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalNnpackSpatialConvolutionOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []const i64, stride_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nnpack_spatial_convolution_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len));
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -3845,11 +3845,11 @@ pub const Tensor = struct {
     }
 
     pub fn internalPackPaddedSequenceBackward(
-        gradient: *const Tensor, input_size: []i64, batch_sizes: *const Tensor, batch_first: bool
+        gradient: *const Tensor, input_size: []const i64, batch_sizes: *const Tensor, batch_first: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__pack_padded_sequence_backward(@ptrCast(&c_tensors), gradient.c_tensor,
-                input_size.ptr, @intCast(input_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
                 batch_sizes.c_tensor,
                 if (batch_first)  1  else  0);
         torch.readAndCleanError();
@@ -3870,23 +3870,23 @@ pub const Tensor = struct {
     }
 
     pub fn internalPadCircular(
-        self: *const Tensor, padding: []i64
+        self: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__pad_circular(@ptrCast(&c_tensors), self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalPadEnum(
-        self: *const Tensor, padding: []i64, mode_: i64, value: ?f64
+        self: *const Tensor, padding: []const i64, mode_: i64, value: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__pad_enum(@ptrCast(&c_tensors), self.c_tensor,
-                padding.ptr, @intCast(padding.len),
+                @constCast(padding.ptr), @intCast(padding.len),
                 mode_,
-                value orelse std.math.nan, (value == null));
+                value orelse std.math.nan(f64), @intFromBool(value == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -3974,7 +3974,7 @@ pub const Tensor = struct {
     pub fn internalPrint(
         s: []const u8
     ) void {
-        __c.atg__print(s.ptr, s.len);
+        __c.atg__print(@constCast(s.ptr), @intCast(s.len));
         torch.readAndCleanError();
         return;
     }
@@ -4001,45 +4001,45 @@ pub const Tensor = struct {
     }
 
     pub fn internalReshapeAlias(
-        self: *const Tensor, size_: []i64, stride_: []i64
+        self: *const Tensor, size_: []const i64, stride_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__reshape_alias(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len),
-                stride_.ptr, @intCast(stride_.len));
+                @constCast(size_.ptr), @intCast(size_.len),
+                @constCast(stride_.ptr), @intCast(stride_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalReshapeAliasCopy(
-        self: *const Tensor, size_: []i64, stride_: []i64
+        self: *const Tensor, size_: []const i64, stride_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__reshape_alias_copy(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len),
-                stride_.ptr, @intCast(stride_.len));
+                @constCast(size_.ptr), @intCast(size_.len),
+                @constCast(stride_.ptr), @intCast(stride_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalReshapeAliasCopyOut(
-        self: *const Tensor, out: *const Tensor, size_: []i64, stride_: []i64
+        self: *const Tensor, out: *const Tensor, size_: []const i64, stride_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__reshape_alias_copy_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                size_.ptr, @intCast(size_.len),
-                stride_.ptr, @intCast(stride_.len));
+                @constCast(size_.ptr), @intCast(size_.len),
+                @constCast(stride_.ptr), @intCast(stride_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalReshapeCopy(
-        self: *const Tensor, size_: []i64
+        self: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__reshape_copy(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -4055,34 +4055,34 @@ pub const Tensor = struct {
     }
 
     pub fn internalResizeOutput(
-        self: *const Tensor, size_: []i64, device_: Device
+        self: *const Tensor, size_: []const i64, device_: Device
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__resize_output(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 device_.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalResizeOutput_(
-        self: *Tensor, size_: []i64, device_: Device
+        self: *Tensor, size_: []const i64, device_: Device
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__resize_output_(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 device_.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalResizeOutputOut(
-        self: *const Tensor, out: *const Tensor, size_: []i64, device_: Device
+        self: *const Tensor, out: *const Tensor, size_: []const i64, device_: Device
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__resize_output_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 device_.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -4138,7 +4138,7 @@ pub const Tensor = struct {
                 dropout_p,
                 if (is_causal)  1  else  0,
                 if (dropout_mask != null) dropout_mask.?.c_tensor else null,
-                scale orelse std.math.nan, (scale == null));
+                scale orelse std.math.nan(f64), @intFromBool(scale == null));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
@@ -4153,7 +4153,7 @@ pub const Tensor = struct {
                 dropout_p,
                 if (is_causal)  1  else  0,
                 if (return_debug_mask)  1  else  0,
-                scale orelse std.math.nan, (scale == null));
+                scale orelse std.math.nan(f64), @intFromBool(scale == null));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }, Tensor { .c_tensor = c_tensors[3] }};
     }
@@ -4169,7 +4169,7 @@ pub const Tensor = struct {
                 if (compute_log_sumexp)  1  else  0,
                 dropout_p,
                 if (is_causal)  1  else  0,
-                scale orelse std.math.nan, (scale == null));
+                scale orelse std.math.nan(f64), @intFromBool(scale == null));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }, Tensor { .c_tensor = c_tensors[3] }};
     }
@@ -4192,7 +4192,7 @@ pub const Tensor = struct {
                 if (is_causal)  1  else  0,
                 philox_seed.c_tensor,
                 philox_offset.c_tensor,
-                scale orelse std.math.nan, (scale == null));
+                scale orelse std.math.nan(f64), @intFromBool(scale == null));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }};
     }
@@ -4207,7 +4207,7 @@ pub const Tensor = struct {
                 dropout_p,
                 if (is_causal)  1  else  0,
                 if (attn_mask != null) attn_mask.?.c_tensor else null,
-                scale orelse std.math.nan, (scale == null));
+                scale orelse std.math.nan(f64), @intFromBool(scale == null));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
@@ -4225,7 +4225,7 @@ pub const Tensor = struct {
                 dropout_p,
                 if (is_causal)  1  else  0,
                 if (attn_mask != null) attn_mask.?.c_tensor else null,
-                scale orelse std.math.nan, (scale == null));
+                scale orelse std.math.nan(f64), @intFromBool(scale == null));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }};
     }
@@ -4272,7 +4272,7 @@ pub const Tensor = struct {
                 dim_,
                 index_.c_tensor,
                 src.c_tensor,
-                reduce.ptr, reduce.len,
+                @constCast(reduce.ptr), @intCast(reduce.len),
                 if (include_self)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -4286,7 +4286,7 @@ pub const Tensor = struct {
                 dim_,
                 index_.c_tensor,
                 src.c_tensor,
-                reduce.ptr, reduce.len,
+                @constCast(reduce.ptr), @intCast(reduce.len),
                 if (include_self)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -4301,7 +4301,7 @@ pub const Tensor = struct {
                 dim_,
                 index_.c_tensor,
                 src.c_tensor,
-                reduce.ptr, reduce.len,
+                @constCast(reduce.ptr), @intCast(reduce.len),
                 if (include_self)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -4314,7 +4314,7 @@ pub const Tensor = struct {
         __c.atg__segment_reduce_backward(@ptrCast(&c_tensors), gradient.c_tensor,
                 output.c_tensor,
                 data_.c_tensor,
-                reduce.ptr, reduce.len,
+                @constCast(reduce.ptr), @intCast(reduce.len),
                 if (lengths != null) lengths.?.c_tensor else null,
                 if (offsets != null) offsets.?.c_tensor else null,
                 axis,
@@ -4331,7 +4331,7 @@ pub const Tensor = struct {
                 gradient.c_tensor,
                 output.c_tensor,
                 data_.c_tensor,
-                reduce.ptr, reduce.len,
+                @constCast(reduce.ptr), @intCast(reduce.len),
                 if (lengths != null) lengths.?.c_tensor else null,
                 if (offsets != null) offsets.?.c_tensor else null,
                 axis,
@@ -4350,7 +4350,7 @@ pub const Tensor = struct {
     }
 
     pub fn internalSlowConv2dBackward(
-        self: *const Tensor, grad_input: *const Tensor, grad_weight: *const Tensor, grad_bias: *const Tensor, grad_output: *const Tensor, weight: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64
+        self: *const Tensor, grad_input: *const Tensor, grad_weight: *const Tensor, grad_bias: *const Tensor, grad_output: *const Tensor, weight: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg__slow_conv2d_backward(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -4359,9 +4359,9 @@ pub const Tensor = struct {
                 grad_output.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len));
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }};
     }
@@ -4486,82 +4486,82 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseBroadcastTo(
-        self: *const Tensor, size_: []i64
+        self: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_broadcast_to(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseBroadcastToCopy(
-        self: *const Tensor, size_: []i64
+        self: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_broadcast_to_copy(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseBroadcastToCopyOut(
-        self: *const Tensor, out: *const Tensor, size_: []i64
+        self: *const Tensor, out: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_broadcast_to_copy_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseBscTensorUnsafe(
-        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
+        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_bsc_tensor_unsafe(@ptrCast(&c_tensors), ccol_indices_.c_tensor,
                 row_indices_.c_tensor,
                 values_.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseBsrTensorUnsafe(
-        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
+        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_bsr_tensor_unsafe(@ptrCast(&c_tensors), crow_indices_.c_tensor,
                 col_indices_.c_tensor,
                 values_.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseCompressedTensorUnsafe(
-        compressed_indices: *const Tensor, plain_indices: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
+        compressed_indices: *const Tensor, plain_indices: *const Tensor, values_: *const Tensor, size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_compressed_tensor_unsafe(@ptrCast(&c_tensors), compressed_indices.c_tensor,
                 plain_indices.c_tensor,
                 values_.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseCooTensorUnsafe(
-        indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions, is_coalesced_: bool
+        indices_: *const Tensor, values_: *const Tensor, size_: []const i64, options_: TensorOptions, is_coalesced_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_coo_tensor_unsafe(@ptrCast(&c_tensors), indices_.c_tensor,
                 values_.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt(),
                 if (is_coalesced_)  1  else  0);
         torch.readAndCleanError();
@@ -4569,24 +4569,24 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseCooTensorWithDims(
-        sparse_dim_: i64, dense_dim_: i64, size_: []i64, options_: TensorOptions
+        sparse_dim_: i64, dense_dim_: i64, size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_coo_tensor_with_dims(@ptrCast(&c_tensors), sparse_dim_,
                 dense_dim_,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseCooTensorWithDimsAndTensors(
-        sparse_dim_: i64, dense_dim_: i64, size_: []i64, indices_: *const Tensor, values_: *const Tensor, options_: TensorOptions, is_coalesced_: bool
+        sparse_dim_: i64, dense_dim_: i64, size_: []const i64, indices_: *const Tensor, values_: *const Tensor, options_: TensorOptions, is_coalesced_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_coo_tensor_with_dims_and_tensors(@ptrCast(&c_tensors), sparse_dim_,
                 dense_dim_,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 indices_.c_tensor,
                 values_.c_tensor,
                 options_.kind.cInt(), options_.device.cInt(),
@@ -4596,13 +4596,13 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseCooTensorWithDimsAndTensorsOut(
-        out: *const Tensor, sparse_dim_: i64, dense_dim_: i64, size_: []i64, indices_: *const Tensor, values_: *const Tensor, is_coalesced_: bool
+        out: *const Tensor, sparse_dim_: i64, dense_dim_: i64, size_: []const i64, indices_: *const Tensor, values_: *const Tensor, is_coalesced_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_coo_tensor_with_dims_and_tensors_out(@ptrCast(&c_tensors), out.c_tensor,
                 sparse_dim_,
                 dense_dim_,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 indices_.c_tensor,
                 values_.c_tensor,
                 if (is_coalesced_)  1  else  0);
@@ -4611,36 +4611,36 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseCooTensorWithDimsOut(
-        out: *const Tensor, sparse_dim_: i64, dense_dim_: i64, size_: []i64
+        out: *const Tensor, sparse_dim_: i64, dense_dim_: i64, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_coo_tensor_with_dims_out(@ptrCast(&c_tensors), out.c_tensor,
                 sparse_dim_,
                 dense_dim_,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseCscTensorUnsafe(
-        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
+        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_csc_tensor_unsafe(@ptrCast(&c_tensors), ccol_indices_.c_tensor,
                 row_indices_.c_tensor,
                 values_.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseCsrProd(
-        self: *const Tensor, dim_: []i64, keepdim: bool, dtype: ?Kind
+        self: *const Tensor, dim_: []const i64, keepdim: bool, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_csr_prod(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
         torch.readAndCleanError();
@@ -4648,12 +4648,12 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseCsrProdDimDtypeOut(
-        self: *const Tensor, out: *const Tensor, dim_: []i64, keepdim: bool, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, dim_: []const i64, keepdim: bool, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_csr_prod_dim_dtype_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
         torch.readAndCleanError();
@@ -4661,11 +4661,11 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseCsrSum(
-        self: *const Tensor, dim_: []i64, keepdim: bool, dtype: ?Kind
+        self: *const Tensor, dim_: []const i64, keepdim: bool, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_csr_sum(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
         torch.readAndCleanError();
@@ -4673,12 +4673,12 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseCsrSumDimDtypeOut(
-        self: *const Tensor, out: *const Tensor, dim_: []i64, keepdim: bool, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, dim_: []const i64, keepdim: bool, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_csr_sum_dim_dtype_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
         torch.readAndCleanError();
@@ -4686,13 +4686,13 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseCsrTensorUnsafe(
-        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
+        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_csr_tensor_unsafe(@ptrCast(&c_tensors), crow_indices_.c_tensor,
                 col_indices_.c_tensor,
                 values_.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -4796,7 +4796,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_mm_reduce(@ptrCast(&c_tensors), sparse.c_tensor,
                 dense.c_tensor,
-                reduce.ptr, reduce.len);
+                @constCast(reduce.ptr), @intCast(reduce.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -4807,7 +4807,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg__sparse_mm_reduce_impl(@ptrCast(&c_tensors), self.c_tensor,
                 other.c_tensor,
-                reduce.ptr, reduce.len);
+                @constCast(reduce.ptr), @intCast(reduce.len));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
@@ -4820,7 +4820,7 @@ pub const Tensor = struct {
                 weight.c_tensor,
                 meta.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                activation.ptr, activation.len,
+                @constCast(activation.ptr), @intCast(activation.len),
                 out_dtype orelse -1);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -4916,56 +4916,56 @@ pub const Tensor = struct {
     }
 
     pub fn internalSparseSumBackward(
-        self: *const Tensor, gradient: *const Tensor, dim_: []i64
+        self: *const Tensor, gradient: *const Tensor, dim_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_sum_backward(@ptrCast(&c_tensors), gradient.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len));
+                @constCast(dim_.ptr), @intCast(dim_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseSumBackwardOut(
-        self: *const Tensor, out: *const Tensor, gradient: *const Tensor, dim_: []i64
+        self: *const Tensor, out: *const Tensor, gradient: *const Tensor, dim_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_sum_backward_out(@ptrCast(&c_tensors), out.c_tensor,
                 gradient.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len));
+                @constCast(dim_.ptr), @intCast(dim_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseSumDim(
-        self: *const Tensor, dim_: []i64
+        self: *const Tensor, dim_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_sum_dim(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len));
+                @constCast(dim_.ptr), @intCast(dim_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseSumDimDtype(
-        self: *const Tensor, dim_: []i64, dtype: Kind
+        self: *const Tensor, dim_: []const i64, dtype: Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_sum_dim_dtype(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 dtype.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSparseSumDimOut(
-        self: *const Tensor, out: *const Tensor, dim_: []i64
+        self: *const Tensor, out: *const Tensor, dim_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_sum_dim_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len));
+                @constCast(dim_.ptr), @intCast(dim_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -4981,25 +4981,25 @@ pub const Tensor = struct {
     }
 
     pub fn internalSpdiags(
-        diagonals: *const Tensor, offsets: *const Tensor, shape: []i64, layout: ?Layout
+        diagonals: *const Tensor, offsets: *const Tensor, shape: []const i64, layout: ?Layout
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__spdiags(@ptrCast(&c_tensors), diagonals.c_tensor,
                 offsets.c_tensor,
-                shape.ptr, @intCast(shape.len),
+                @constCast(shape.ptr), @intCast(shape.len),
                 layout orelse - 1);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalSpdiagsOut(
-        out: *const Tensor, diagonals: *const Tensor, offsets: *const Tensor, shape: []i64, layout: ?Layout
+        out: *const Tensor, diagonals: *const Tensor, offsets: *const Tensor, shape: []const i64, layout: ?Layout
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__spdiags_out(@ptrCast(&c_tensors), out.c_tensor,
                 diagonals.c_tensor,
                 offsets.c_tensor,
-                shape.ptr, @intCast(shape.len),
+                @constCast(shape.ptr), @intCast(shape.len),
                 layout orelse - 1);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -5083,7 +5083,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_ambiguous_defaults_b(@ptrCast(&c_tensors), dummy.c_tensor,
                 a,
-                b.ptr, b.len);
+                @constCast(b.ptr), @intCast(b.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -5180,7 +5180,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_optional_filled_intlist(@ptrCast(&c_tensors), values_.c_tensor,
-                addends.ptr, @intCast(addends.len));
+                @constCast(addends.ptr), @intCast(addends.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -5191,7 +5191,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_optional_filled_intlist_out(@ptrCast(&c_tensors), out.c_tensor,
                 values_.c_tensor,
-                addends.ptr, @intCast(addends.len));
+                @constCast(addends.ptr), @intCast(addends.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -5201,7 +5201,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_optional_floatlist(@ptrCast(&c_tensors), values_.c_tensor,
-                addends.ptr, @intCast(addends.len));
+                @constCast(addends.ptr), @intCast(addends.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -5212,7 +5212,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_optional_floatlist_out(@ptrCast(&c_tensors), out.c_tensor,
                 values_.c_tensor,
-                addends.ptr, @intCast(addends.len));
+                @constCast(addends.ptr), @intCast(addends.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -5222,7 +5222,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_optional_intlist(@ptrCast(&c_tensors), values_.c_tensor,
-                addends.ptr, @intCast(addends.len));
+                @constCast(addends.ptr), @intCast(addends.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -5233,7 +5233,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_optional_intlist_out(@ptrCast(&c_tensors), out.c_tensor,
                 values_.c_tensor,
-                addends.ptr, @intCast(addends.len));
+                @constCast(addends.ptr), @intCast(addends.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -5264,8 +5264,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_string_default(@ptrCast(&c_tensors), dummy.c_tensor,
-                a.ptr, a.len,
-                b.ptr, b.len);
+                @constCast(a.ptr), @intCast(a.len),
+                @constCast(b.ptr), @intCast(b.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -5355,54 +5355,54 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_sparse(@ptrCast(&c_tensors), self.c_tensor,
                 layout orelse - 1,
-                blocksize.ptr, @intCast(blocksize.len),
-                dense_dim_ orelse 0, (dense_dim_ == null));
+                @constCast(blocksize.ptr), @intCast(blocksize.len),
+                dense_dim_ orelse 0, @intFromBool(dense_dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalToSparseBsc(
-        self: *const Tensor, blocksize: []i64, dense_dim_: ?i64
+        self: *const Tensor, blocksize: []const i64, dense_dim_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_sparse_bsc(@ptrCast(&c_tensors), self.c_tensor,
-                blocksize.ptr, @intCast(blocksize.len),
-                dense_dim_ orelse 0, (dense_dim_ == null));
+                @constCast(blocksize.ptr), @intCast(blocksize.len),
+                dense_dim_ orelse 0, @intFromBool(dense_dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalToSparseBscOut(
-        self: *const Tensor, out: *const Tensor, blocksize: []i64, dense_dim_: ?i64
+        self: *const Tensor, out: *const Tensor, blocksize: []const i64, dense_dim_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_sparse_bsc_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                blocksize.ptr, @intCast(blocksize.len),
-                dense_dim_ orelse 0, (dense_dim_ == null));
+                @constCast(blocksize.ptr), @intCast(blocksize.len),
+                dense_dim_ orelse 0, @intFromBool(dense_dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalToSparseBsr(
-        self: *const Tensor, blocksize: []i64, dense_dim_: ?i64
+        self: *const Tensor, blocksize: []const i64, dense_dim_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_sparse_bsr(@ptrCast(&c_tensors), self.c_tensor,
-                blocksize.ptr, @intCast(blocksize.len),
-                dense_dim_ orelse 0, (dense_dim_ == null));
+                @constCast(blocksize.ptr), @intCast(blocksize.len),
+                dense_dim_ orelse 0, @intFromBool(dense_dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalToSparseBsrOut(
-        self: *const Tensor, out: *const Tensor, blocksize: []i64, dense_dim_: ?i64
+        self: *const Tensor, out: *const Tensor, blocksize: []const i64, dense_dim_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_sparse_bsr_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                blocksize.ptr, @intCast(blocksize.len),
-                dense_dim_ orelse 0, (dense_dim_ == null));
+                @constCast(blocksize.ptr), @intCast(blocksize.len),
+                dense_dim_ orelse 0, @intFromBool(dense_dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -5412,7 +5412,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_sparse_csc(@ptrCast(&c_tensors), self.c_tensor,
-                dense_dim_ orelse 0, (dense_dim_ == null));
+                dense_dim_ orelse 0, @intFromBool(dense_dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -5423,7 +5423,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_sparse_csc_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dense_dim_ orelse 0, (dense_dim_ == null));
+                dense_dim_ orelse 0, @intFromBool(dense_dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -5433,7 +5433,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_sparse_csr(@ptrCast(&c_tensors), self.c_tensor,
-                dense_dim_ orelse 0, (dense_dim_ == null));
+                dense_dim_ orelse 0, @intFromBool(dense_dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -5444,7 +5444,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_sparse_csr_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dense_dim_ orelse 0, (dense_dim_ == null));
+                dense_dim_ orelse 0, @intFromBool(dense_dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -5456,8 +5456,8 @@ pub const Tensor = struct {
         __c.atg__to_sparse_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 layout orelse - 1,
-                blocksize.ptr, @intCast(blocksize.len),
-                dense_dim_ orelse 0, (dense_dim_ == null));
+                @constCast(blocksize.ptr), @intCast(blocksize.len),
+                dense_dim_ orelse 0, @intFromBool(dense_dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -5540,7 +5540,7 @@ pub const Tensor = struct {
                 ffn_weight_2.c_tensor,
                 ffn_bias_2.c_tensor,
                 if (mask != null) mask.?.c_tensor else null,
-                mask_type orelse 0, (mask_type == null));
+                mask_type orelse 0, @intFromBool(mask_type == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -5569,39 +5569,39 @@ pub const Tensor = struct {
                 ffn_weight_2.c_tensor,
                 ffn_bias_2.c_tensor,
                 if (mask != null) mask.?.c_tensor else null,
-                mask_type orelse 0, (mask_type == null));
+                mask_type orelse 0, @intFromBool(mask_type == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalTrilinear(
-        i1_: *const Tensor, i2_: *const Tensor, i3_: *const Tensor, expand1: []i64, expand2: []i64, expand3: []i64, sumdim: []i64, unroll_dim: i64
+        i1_: *const Tensor, i2_: *const Tensor, i3_: *const Tensor, expand1: []const i64, expand2: []const i64, expand3: []const i64, sumdim: []const i64, unroll_dim: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__trilinear(@ptrCast(&c_tensors), i1_.c_tensor,
                 i2_.c_tensor,
                 i3_.c_tensor,
-                expand1.ptr, @intCast(expand1.len),
-                expand2.ptr, @intCast(expand2.len),
-                expand3.ptr, @intCast(expand3.len),
-                sumdim.ptr, @intCast(sumdim.len),
+                @constCast(expand1.ptr), @intCast(expand1.len),
+                @constCast(expand2.ptr), @intCast(expand2.len),
+                @constCast(expand3.ptr), @intCast(expand3.len),
+                @constCast(sumdim.ptr), @intCast(sumdim.len),
                 unroll_dim);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalTrilinearOut(
-        out: *const Tensor, i1_: *const Tensor, i2_: *const Tensor, i3_: *const Tensor, expand1: []i64, expand2: []i64, expand3: []i64, sumdim: []i64, unroll_dim: i64
+        out: *const Tensor, i1_: *const Tensor, i2_: *const Tensor, i3_: *const Tensor, expand1: []const i64, expand2: []const i64, expand3: []const i64, sumdim: []const i64, unroll_dim: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__trilinear_out(@ptrCast(&c_tensors), out.c_tensor,
                 i1_.c_tensor,
                 i2_.c_tensor,
                 i3_.c_tensor,
-                expand1.ptr, @intCast(expand1.len),
-                expand2.ptr, @intCast(expand2.len),
-                expand3.ptr, @intCast(expand3.len),
-                sumdim.ptr, @intCast(sumdim.len),
+                @constCast(expand1.ptr), @intCast(expand1.len),
+                @constCast(expand2.ptr), @intCast(expand2.len),
+                @constCast(expand3.ptr), @intCast(expand3.len),
+                @constCast(sumdim.ptr), @intCast(sumdim.len),
                 unroll_dim);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -5753,78 +5753,78 @@ pub const Tensor = struct {
     }
 
     pub fn internalUnsafeView(
-        self: *const Tensor, size_: []i64
+        self: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__unsafe_view(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUnsafeViewOut(
-        self: *const Tensor, out: *const Tensor, size_: []i64
+        self: *const Tensor, out: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__unsafe_view_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleBicubic2dAa(
-        self: *const Tensor, output_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, output_size: []const i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_bicubic2d_aa(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 if (align_corners)  1  else  0,
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleBicubic2dAaBackward(
-        grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_bicubic2d_aa_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
                 if (align_corners)  1  else  0,
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleBicubic2dAaBackwardGradInput(
-        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_bicubic2d_aa_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
                 if (align_corners)  1  else  0,
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleBicubic2dAaOut(
-        self: *const Tensor, out: *const Tensor, output_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []const i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_bicubic2d_aa_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 if (align_corners)  1  else  0,
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -5834,65 +5834,65 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_bicubic2d_aa_vec(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 if (align_corners)  1  else  0,
-                scale_factors.ptr, @intCast(scale_factors.len));
+                @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleBilinear2dAa(
-        self: *const Tensor, output_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, output_size: []const i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_bilinear2d_aa(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 if (align_corners)  1  else  0,
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleBilinear2dAaBackward(
-        grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_bilinear2d_aa_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
                 if (align_corners)  1  else  0,
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleBilinear2dAaBackwardGradInput(
-        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_bilinear2d_aa_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
                 if (align_corners)  1  else  0,
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleBilinear2dAaOut(
-        self: *const Tensor, out: *const Tensor, output_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []const i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_bilinear2d_aa_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 if (align_corners)  1  else  0,
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -5902,57 +5902,57 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_bilinear2d_aa_vec(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 if (align_corners)  1  else  0,
-                scale_factors.ptr, @intCast(scale_factors.len));
+                @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleNearestExact1d(
-        self: *const Tensor, output_size: []i64, scales: ?f64
+        self: *const Tensor, output_size: []const i64, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact1d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                scales orelse std.math.nan, (scales == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                scales orelse std.math.nan(f64), @intFromBool(scales == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleNearestExact1dBackward(
-        grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales: ?f64
+        grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact1d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
-                scales orelse std.math.nan, (scales == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
+                scales orelse std.math.nan(f64), @intFromBool(scales == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleNearestExact1dBackwardGradInput(
-        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact1d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
-                scales orelse std.math.nan, (scales == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
+                scales orelse std.math.nan(f64), @intFromBool(scales == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleNearestExact1dOut(
-        self: *const Tensor, out: *const Tensor, output_size: []i64, scales: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []const i64, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact1d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                scales orelse std.math.nan, (scales == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                scales orelse std.math.nan(f64), @intFromBool(scales == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -5962,60 +5962,60 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact1d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                scale_factors.ptr, @intCast(scale_factors.len));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleNearestExact2d(
-        self: *const Tensor, output_size: []i64, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, output_size: []const i64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact2d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleNearestExact2dBackward(
-        grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales_h: ?f64, scales_w: ?f64
+        grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleNearestExact2dBackwardGradInput(
-        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales_h: ?f64, scales_w: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleNearestExact2dOut(
-        self: *const Tensor, out: *const Tensor, output_size: []i64, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []const i64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact2d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -6025,64 +6025,64 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact2d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                scale_factors.ptr, @intCast(scale_factors.len));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleNearestExact3d(
-        self: *const Tensor, output_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, output_size: []const i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact3d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                scales_d orelse std.math.nan, (scales_d == null),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                scales_d orelse std.math.nan(f64), @intFromBool(scales_d == null),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleNearestExact3dBackward(
-        grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact3d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
-                scales_d orelse std.math.nan, (scales_d == null),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
+                scales_d orelse std.math.nan(f64), @intFromBool(scales_d == null),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleNearestExact3dBackwardGradInput(
-        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact3d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
-                scales_d orelse std.math.nan, (scales_d == null),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
+                scales_d orelse std.math.nan(f64), @intFromBool(scales_d == null),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUpsampleNearestExact3dOut(
-        self: *const Tensor, out: *const Tensor, output_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []const i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact3d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                scales_d orelse std.math.nan, (scales_d == null),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                scales_d orelse std.math.nan(f64), @intFromBool(scales_d == null),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -6092,19 +6092,19 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact3d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                scale_factors.ptr, @intCast(scale_factors.len));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn internalUseCudnnCtcLoss(
-        log_probs: *const Tensor, targets: *const Tensor, input_lengths: []i64, target_lengths: []i64, blank: i64
+        log_probs: *const Tensor, targets: *const Tensor, input_lengths: []const i64, target_lengths: []const i64, blank: i64
     ) bool {
         const return_ = __c.atg__use_cudnn_ctc_loss(log_probs.c_tensor,
                 targets.c_tensor,
-                input_lengths.ptr, @intCast(input_lengths.len),
-                target_lengths.ptr, @intCast(target_lengths.len),
+                @constCast(input_lengths.ptr), @intCast(input_lengths.len),
+                @constCast(target_lengths.ptr), @intCast(target_lengths.len),
                 blank);
        torch.readAndCleanError();
         return return_ != 0;
@@ -6144,57 +6144,57 @@ pub const Tensor = struct {
     }
 
     pub fn internalValidateSparseBscTensorArgs(
-        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, size_: []i64
+        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, size_: []const i64
     ) void {
         __c.atg__validate_sparse_bsc_tensor_args(ccol_indices_.c_tensor,
                 row_indices_.c_tensor,
                 values_.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return;
     }
 
     pub fn internalValidateSparseBsrTensorArgs(
-        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, size_: []i64
+        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, size_: []const i64
     ) void {
         __c.atg__validate_sparse_bsr_tensor_args(crow_indices_.c_tensor,
                 col_indices_.c_tensor,
                 values_.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return;
     }
 
     pub fn internalValidateSparseCompressedTensorArgs(
-        compressed_indices: *const Tensor, plain_indices: *const Tensor, values_: *const Tensor, size_: []i64, layout: Layout
+        compressed_indices: *const Tensor, plain_indices: *const Tensor, values_: *const Tensor, size_: []const i64, layout: Layout
     ) void {
         __c.atg__validate_sparse_compressed_tensor_args(compressed_indices.c_tensor,
                 plain_indices.c_tensor,
                 values_.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 layout.toI8());
         torch.readAndCleanError();
         return;
     }
 
     pub fn internalValidateSparseCscTensorArgs(
-        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, size_: []i64
+        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, size_: []const i64
     ) void {
         __c.atg__validate_sparse_csc_tensor_args(ccol_indices_.c_tensor,
                 row_indices_.c_tensor,
                 values_.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return;
     }
 
     pub fn internalValidateSparseCsrTensorArgs(
-        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, size_: []i64
+        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, size_: []const i64
     ) void {
         __c.atg__validate_sparse_csr_tensor_args(crow_indices_.c_tensor,
                 col_indices_.c_tensor,
                 values_.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return;
     }
@@ -6447,42 +6447,42 @@ pub const Tensor = struct {
     }
 
     pub fn adaptiveAvgPool1d(
-        self: *const Tensor, output_size: []i64
+        self: *const Tensor, output_size: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_adaptive_avg_pool1d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn adaptiveAvgPool2d(
-        self: *const Tensor, output_size: []i64
+        self: *const Tensor, output_size: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_adaptive_avg_pool2d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn adaptiveAvgPool2dOut(
-        self: *const Tensor, out: *const Tensor, output_size: []i64
+        self: *const Tensor, out: *const Tensor, output_size: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_adaptive_avg_pool2d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn adaptiveAvgPool3d(
-        self: *const Tensor, output_size: []i64
+        self: *const Tensor, output_size: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_adaptive_avg_pool3d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -6499,32 +6499,32 @@ pub const Tensor = struct {
     }
 
     pub fn adaptiveAvgPool3dOut(
-        self: *const Tensor, out: *const Tensor, output_size: []i64
+        self: *const Tensor, out: *const Tensor, output_size: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_adaptive_avg_pool3d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn adaptiveMaxPool1d(
-        self: *const Tensor, output_size: []i64
+        self: *const Tensor, output_size: []const i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_adaptive_max_pool1d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
 
     pub fn adaptiveMaxPool2d(
-        self: *const Tensor, output_size: []i64
+        self: *const Tensor, output_size: []const i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_adaptive_max_pool2d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
@@ -6553,23 +6553,23 @@ pub const Tensor = struct {
     }
 
     pub fn adaptiveMaxPool2dOut(
-        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, output_size: []i64
+        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, output_size: []const i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_adaptive_max_pool2d_out(@ptrCast(&c_tensors), out.c_tensor,
                 indices_.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
 
     pub fn adaptiveMaxPool3d(
-        self: *const Tensor, output_size: []i64
+        self: *const Tensor, output_size: []const i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_adaptive_max_pool3d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
@@ -6598,13 +6598,13 @@ pub const Tensor = struct {
     }
 
     pub fn adaptiveMaxPool3dOut(
-        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, output_size: []i64
+        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, output_size: []const i64
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_adaptive_max_pool3d_out(@ptrCast(&c_tensors), out.c_tensor,
                 indices_.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
@@ -6885,34 +6885,34 @@ pub const Tensor = struct {
     }
 
     pub fn affineGridGenerator(
-        theta: *const Tensor, size_: []i64, align_corners: bool
+        theta: *const Tensor, size_: []const i64, align_corners: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_affine_grid_generator(@ptrCast(&c_tensors), theta.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 if (align_corners)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn affineGridGeneratorBackward(
-        gradient: *const Tensor, size_: []i64, align_corners: bool
+        gradient: *const Tensor, size_: []const i64, align_corners: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_affine_grid_generator_backward(@ptrCast(&c_tensors), gradient.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 if (align_corners)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn affineGridGeneratorOut(
-        out: *const Tensor, theta: *const Tensor, size_: []i64, align_corners: bool
+        out: *const Tensor, theta: *const Tensor, size_: []const i64, align_corners: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_affine_grid_generator_out(@ptrCast(&c_tensors), out.c_tensor,
                 theta.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 if (align_corners)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -7006,7 +7006,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_all_dims(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -7018,7 +7018,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_all_dims_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -7071,46 +7071,46 @@ pub const Tensor = struct {
     }
 
     pub fn amax(
-        self: *const Tensor, dim_: []i64, keepdim: bool
+        self: *const Tensor, dim_: []const i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_amax(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn amaxOut(
-        self: *const Tensor, out: *const Tensor, dim_: []i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: []const i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_amax_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn amin(
-        self: *const Tensor, dim_: []i64, keepdim: bool
+        self: *const Tensor, dim_: []const i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_amin(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn aminOut(
-        self: *const Tensor, out: *const Tensor, dim_: []i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: []const i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_amin_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -7121,7 +7121,7 @@ pub const Tensor = struct {
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_aminmax(@ptrCast(&c_tensors), self.c_tensor,
-                dim_ orelse 0, (dim_ == null),
+                dim_ orelse 0, @intFromBool(dim_ == null),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
@@ -7134,7 +7134,7 @@ pub const Tensor = struct {
         __c.atg_aminmax_out(@ptrCast(&c_tensors), min_.c_tensor,
                 max_.c_tensor,
                 self.c_tensor,
-                dim_ orelse 0, (dim_ == null),
+                dim_ orelse 0, @intFromBool(dim_ == null),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
@@ -7194,7 +7194,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_any_dims(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -7206,7 +7206,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_any_dims_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -7461,7 +7461,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_argmax(@ptrCast(&c_tensors), self.c_tensor,
-                dim_ orelse 0, (dim_ == null),
+                dim_ orelse 0, @intFromBool(dim_ == null),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -7473,7 +7473,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_argmax_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_ orelse 0, (dim_ == null),
+                dim_ orelse 0, @intFromBool(dim_ == null),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -7484,7 +7484,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_argmin(@ptrCast(&c_tensors), self.c_tensor,
-                dim_ orelse 0, (dim_ == null),
+                dim_ orelse 0, @intFromBool(dim_ == null),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -7496,7 +7496,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_argmin_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_ orelse 0, (dim_ == null),
+                dim_ orelse 0, @intFromBool(dim_ == null),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -7548,77 +7548,77 @@ pub const Tensor = struct {
     }
 
     pub fn asStrided(
-        self: *const Tensor, size_: []i64, stride_: []i64, storage_offset: ?i64
+        self: *const Tensor, size_: []const i64, stride_: []const i64, storage_offset: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_as_strided(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len),
-                stride_.ptr, @intCast(stride_.len),
-                storage_offset orelse 0, (storage_offset == null));
+                @constCast(size_.ptr), @intCast(size_.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                storage_offset orelse 0, @intFromBool(storage_offset == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn asStrided_(
-        self: *Tensor, size_: []i64, stride_: []i64, storage_offset: ?i64
+        self: *Tensor, size_: []const i64, stride_: []const i64, storage_offset: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_as_strided_(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len),
-                stride_.ptr, @intCast(stride_.len),
-                storage_offset orelse 0, (storage_offset == null));
+                @constCast(size_.ptr), @intCast(size_.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                storage_offset orelse 0, @intFromBool(storage_offset == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn asStridedCopy(
-        self: *const Tensor, size_: []i64, stride_: []i64, storage_offset: ?i64
+        self: *const Tensor, size_: []const i64, stride_: []const i64, storage_offset: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_as_strided_copy(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len),
-                stride_.ptr, @intCast(stride_.len),
-                storage_offset orelse 0, (storage_offset == null));
+                @constCast(size_.ptr), @intCast(size_.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                storage_offset orelse 0, @intFromBool(storage_offset == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn asStridedCopyOut(
-        self: *const Tensor, out: *const Tensor, size_: []i64, stride_: []i64, storage_offset: ?i64
+        self: *const Tensor, out: *const Tensor, size_: []const i64, stride_: []const i64, storage_offset: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_as_strided_copy_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                size_.ptr, @intCast(size_.len),
-                stride_.ptr, @intCast(stride_.len),
-                storage_offset orelse 0, (storage_offset == null));
+                @constCast(size_.ptr), @intCast(size_.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                storage_offset orelse 0, @intFromBool(storage_offset == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn asStridedScatter(
-        self: *const Tensor, src: *const Tensor, size_: []i64, stride_: []i64, storage_offset: ?i64
+        self: *const Tensor, src: *const Tensor, size_: []const i64, stride_: []const i64, storage_offset: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_as_strided_scatter(@ptrCast(&c_tensors), self.c_tensor,
                 src.c_tensor,
-                size_.ptr, @intCast(size_.len),
-                stride_.ptr, @intCast(stride_.len),
-                storage_offset orelse 0, (storage_offset == null));
+                @constCast(size_.ptr), @intCast(size_.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                storage_offset orelse 0, @intFromBool(storage_offset == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn asStridedScatterOut(
-        self: *const Tensor, out: *const Tensor, src: *const Tensor, size_: []i64, stride_: []i64, storage_offset: ?i64
+        self: *const Tensor, out: *const Tensor, src: *const Tensor, size_: []const i64, stride_: []const i64, storage_offset: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_as_strided_scatter_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 src.c_tensor,
-                size_.ptr, @intCast(size_.len),
-                stride_.ptr, @intCast(stride_.len),
-                storage_offset orelse 0, (storage_offset == null));
+                @constCast(size_.ptr), @intCast(size_.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                storage_offset orelse 0, @intFromBool(storage_offset == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -7839,13 +7839,13 @@ pub const Tensor = struct {
     }
 
     pub fn avgPool1d(
-        self: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool
+        self: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, ceil_mode: bool, count_include_pad: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_avg_pool1d(@ptrCast(&c_tensors), self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
                 if (ceil_mode)  1  else  0,
                 if (count_include_pad)  1  else  0);
         torch.readAndCleanError();
@@ -7853,129 +7853,129 @@ pub const Tensor = struct {
     }
 
     pub fn avgPool2d(
-        self: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
+        self: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_avg_pool2d(@ptrCast(&c_tensors), self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
                 if (ceil_mode)  1  else  0,
                 if (count_include_pad)  1  else  0,
-                divisor_override orelse 0, (divisor_override == null));
+                divisor_override orelse 0, @intFromBool(divisor_override == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn avgPool2dBackward(
-        self: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
+        self: *const Tensor, grad_output: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_avg_pool2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
                 if (ceil_mode)  1  else  0,
                 if (count_include_pad)  1  else  0,
-                divisor_override orelse 0, (divisor_override == null));
+                divisor_override orelse 0, @intFromBool(divisor_override == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn avgPool2dBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_avg_pool2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
                 if (ceil_mode)  1  else  0,
                 if (count_include_pad)  1  else  0,
-                divisor_override orelse 0, (divisor_override == null));
+                divisor_override orelse 0, @intFromBool(divisor_override == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn avgPool2dOut(
-        self: *const Tensor, out: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
+        self: *const Tensor, out: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_avg_pool2d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
                 if (ceil_mode)  1  else  0,
                 if (count_include_pad)  1  else  0,
-                divisor_override orelse 0, (divisor_override == null));
+                divisor_override orelse 0, @intFromBool(divisor_override == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn avgPool3d(
-        self: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
+        self: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_avg_pool3d(@ptrCast(&c_tensors), self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
                 if (ceil_mode)  1  else  0,
                 if (count_include_pad)  1  else  0,
-                divisor_override orelse 0, (divisor_override == null));
+                divisor_override orelse 0, @intFromBool(divisor_override == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn avgPool3dBackward(
-        self: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
+        self: *const Tensor, grad_output: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_avg_pool3d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
                 if (ceil_mode)  1  else  0,
                 if (count_include_pad)  1  else  0,
-                divisor_override orelse 0, (divisor_override == null));
+                divisor_override orelse 0, @intFromBool(divisor_override == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn avgPool3dBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_avg_pool3d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
                 if (ceil_mode)  1  else  0,
                 if (count_include_pad)  1  else  0,
-                divisor_override orelse 0, (divisor_override == null));
+                divisor_override orelse 0, @intFromBool(divisor_override == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn avgPool3dOut(
-        self: *const Tensor, out: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
+        self: *const Tensor, out: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, ceil_mode: bool, count_include_pad: bool, divisor_override: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_avg_pool3d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
                 if (ceil_mode)  1  else  0,
                 if (count_include_pad)  1  else  0,
-                divisor_override orelse 0, (divisor_override == null));
+                divisor_override orelse 0, @intFromBool(divisor_override == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8357,7 +8357,7 @@ pub const Tensor = struct {
         __c.atg_binary_cross_entropy(@ptrCast(&c_tensors), self.c_tensor,
                 target.c_tensor,
                 if (weight != null) weight.?.c_tensor else null,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8370,7 +8370,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 target.c_tensor,
                 if (weight != null) weight.?.c_tensor else null,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8384,7 +8384,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 target.c_tensor,
                 if (weight != null) weight.?.c_tensor else null,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8397,7 +8397,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 target.c_tensor,
                 if (weight != null) weight.?.c_tensor else null,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8410,7 +8410,7 @@ pub const Tensor = struct {
                 target.c_tensor,
                 if (weight != null) weight.?.c_tensor else null,
                 if (pos_weight != null) pos_weight.?.c_tensor else null,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8424,7 +8424,7 @@ pub const Tensor = struct {
                 target.c_tensor,
                 if (weight != null) weight.?.c_tensor else null,
                 if (pos_weight != null) pos_weight.?.c_tensor else null,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -9014,11 +9014,11 @@ pub const Tensor = struct {
     }
 
     pub fn broadcastTo(
-        self: *const Tensor, size_: []i64
+        self: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_broadcast_to(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -9181,7 +9181,7 @@ pub const Tensor = struct {
         __c.atg_cdist(@ptrCast(&c_tensors), x1.c_tensor,
                 x2.c_tensor,
                 p,
-                compute_mode orelse 0, (compute_mode == null));
+                compute_mode orelse 0, @intFromBool(compute_mode == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -9666,30 +9666,30 @@ pub const Tensor = struct {
     }
 
     pub fn col2im(
-        self: *const Tensor, output_size: []i64, kernel_size: []i64, dilation: []i64, padding: []i64, stride_: []i64
+        self: *const Tensor, output_size: []const i64, kernel_size: []const i64, dilation: []const i64, padding: []const i64, stride_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_col2im(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                kernel_size.ptr, @intCast(kernel_size.len),
-                dilation.ptr, @intCast(dilation.len),
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn col2imOut(
-        self: *const Tensor, out: *const Tensor, output_size: []i64, kernel_size: []i64, dilation: []i64, padding: []i64, stride_: []i64
+        self: *const Tensor, out: *const Tensor, output_size: []const i64, kernel_size: []const i64, dilation: []const i64, padding: []const i64, stride_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_col2im_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                kernel_size.ptr, @intCast(kernel_size.len),
-                dilation.ptr, @intCast(dilation.len),
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -9853,22 +9853,22 @@ pub const Tensor = struct {
     }
 
     pub fn constantPadNd(
-        self: *const Tensor, padding: []i64
+        self: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_constant_pad_nd(@ptrCast(&c_tensors), self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn constantPadNdOut(
-        self: *const Tensor, out: *const Tensor, padding: []i64
+        self: *const Tensor, out: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_constant_pad_nd_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -9883,122 +9883,122 @@ pub const Tensor = struct {
     }
 
     pub fn conv1d(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv1d(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn conv1dPadding(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []const u8, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const u8, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv1d_padding(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, padding.len,
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn conv2d(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv2d(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn conv2dPadding(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []const u8, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const u8, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv2d_padding(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, padding.len,
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn conv3d(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv3d(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn conv3dPadding(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []const u8, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const u8, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv3d_padding(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, padding.len,
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn convDepthwise3d(
-        self: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64
+        self: *const Tensor, weight: *const Tensor, kernel_size: []const i64, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv_depthwise3d(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len));
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn convDepthwise3dOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []const i64, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv_depthwise3d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len));
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -10042,118 +10042,118 @@ pub const Tensor = struct {
     }
 
     pub fn convTranspose1d(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, output_padding: []i64, groups: i64, dilation: []i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, output_padding: []const i64, groups: i64, dilation: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv_transpose1d(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                output_padding.ptr, @intCast(output_padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
                 groups,
-                dilation.ptr, @intCast(dilation.len));
+                @constCast(dilation.ptr), @intCast(dilation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn convTranspose2d(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, output_padding: []i64, groups: i64, dilation: []i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, output_padding: []const i64, groups: i64, dilation: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv_transpose2d(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                output_padding.ptr, @intCast(output_padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
                 groups,
-                dilation.ptr, @intCast(dilation.len));
+                @constCast(dilation.ptr), @intCast(dilation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn convTranspose3d(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, output_padding: []i64, groups: i64, dilation: []i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, output_padding: []const i64, groups: i64, dilation: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_conv_transpose3d(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                output_padding.ptr, @intCast(output_padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
                 groups,
-                dilation.ptr, @intCast(dilation.len));
+                @constCast(dilation.ptr), @intCast(dilation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn convolution(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64, transposed: bool, output_padding: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_convolution(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (transposed)  1  else  0,
-                output_padding.ptr, @intCast(output_padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn convolutionOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64, transposed: bool, output_padding: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_convolution_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (transposed)  1  else  0,
-                output_padding.ptr, @intCast(output_padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn convolutionOverrideable(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64, transposed: bool, output_padding: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_convolution_overrideable(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (transposed)  1  else  0,
-                output_padding.ptr, @intCast(output_padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn convolutionOverrideableOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, transposed: bool, output_padding: []i64, groups: i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64, transposed: bool, output_padding: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_convolution_overrideable_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (transposed)  1  else  0,
-                output_padding.ptr, @intCast(output_padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -10328,7 +10328,7 @@ pub const Tensor = struct {
                 input2.c_tensor,
                 target.c_tensor,
                 margin,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -10350,28 +10350,28 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_count_nonzero(@ptrCast(&c_tensors), self.c_tensor,
-                dim_ orelse 0, (dim_ == null));
+                dim_ orelse 0, @intFromBool(dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn countNonzeroDimIntlist(
-        self: *const Tensor, dim_: []i64
+        self: *const Tensor, dim_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_count_nonzero_dim_intlist(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len));
+                @constCast(dim_.ptr), @intCast(dim_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn countNonzeroDimIntlistOut(
-        self: *const Tensor, out: *const Tensor, dim_: []i64
+        self: *const Tensor, out: *const Tensor, dim_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_count_nonzero_dim_intlist_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len));
+                @constCast(dim_.ptr), @intCast(dim_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -10382,7 +10382,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_count_nonzero_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_ orelse 0, (dim_ == null));
+                dim_ orelse 0, @intFromBool(dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -10405,7 +10405,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cross(@ptrCast(&c_tensors), self.c_tensor,
                 other.c_tensor,
-                dim_ orelse 0, (dim_ == null));
+                dim_ orelse 0, @intFromBool(dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -10417,7 +10417,7 @@ pub const Tensor = struct {
         __c.atg_cross_entropy_loss(@ptrCast(&c_tensors), self.c_tensor,
                 target.c_tensor,
                 if (weight != null) weight.?.c_tensor else null,
-                reduction.to_int(),
+                reduction.toInt(),
                 ignore_index,
                 label_smoothing);
         torch.readAndCleanError();
@@ -10431,7 +10431,7 @@ pub const Tensor = struct {
         __c.atg_cross_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 other.c_tensor,
-                dim_ orelse 0, (dim_ == null));
+                dim_ orelse 0, @intFromBool(dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -10465,15 +10465,15 @@ pub const Tensor = struct {
     }
 
     pub fn ctcLoss(
-        log_probs: *const Tensor, targets: *const Tensor, input_lengths: []i64, target_lengths: []i64, blank: i64, reduction: i64, zero_infinity: bool
+        log_probs: *const Tensor, targets: *const Tensor, input_lengths: []const i64, target_lengths: []const i64, blank: i64, reduction: i64, zero_infinity: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ctc_loss(@ptrCast(&c_tensors), log_probs.c_tensor,
                 targets.c_tensor,
-                input_lengths.ptr, @intCast(input_lengths.len),
-                target_lengths.ptr, @intCast(target_lengths.len),
+                @constCast(input_lengths.ptr), @intCast(input_lengths.len),
+                @constCast(target_lengths.ptr), @intCast(target_lengths.len),
                 blank,
-                reduction.to_int(),
+                reduction.toInt(),
                 if (zero_infinity)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -10488,7 +10488,7 @@ pub const Tensor = struct {
                 input_lengths.c_tensor,
                 target_lengths.c_tensor,
                 blank,
-                reduction.to_int(),
+                reduction.toInt(),
                 if (zero_infinity)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -10622,14 +10622,14 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnConvolution(
-        self: *const Tensor, weight: *const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool, allow_tf32: bool
+        self: *const Tensor, weight: *const Tensor, padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64, benchmark: bool, deterministic: bool, allow_tf32: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_convolution(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups,
                 if (benchmark)  1  else  0,
                 if (deterministic)  1  else  0,
@@ -10639,7 +10639,7 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnConvolutionAddRelu(
-        self: *const Tensor, weight: *const Tensor, z: *const Tensor, alpha: Scalar, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, z: *const Tensor, alpha: Scalar, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_convolution_add_relu(@ptrCast(&c_tensors), self.c_tensor,
@@ -10647,16 +10647,16 @@ pub const Tensor = struct {
                 z.c_tensor,
                 alpha.into().c_scalar,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn cudnnConvolutionAddReluOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, z: *const Tensor, alpha: Scalar, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, z: *const Tensor, alpha: Scalar, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_convolution_add_relu_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -10665,24 +10665,24 @@ pub const Tensor = struct {
                 z.c_tensor,
                 alpha.into().c_scalar,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn cudnnConvolutionOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool, allow_tf32: bool
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64, benchmark: bool, deterministic: bool, allow_tf32: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_convolution_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups,
                 if (benchmark)  1  else  0,
                 if (deterministic)  1  else  0,
@@ -10692,46 +10692,46 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnConvolutionRelu(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_convolution_relu(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn cudnnConvolutionReluOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_convolution_relu_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn cudnnConvolutionTranspose(
-        self: *const Tensor, weight: *const Tensor, padding: []i64, output_padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool, allow_tf32: bool
+        self: *const Tensor, weight: *const Tensor, padding: []const i64, output_padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64, benchmark: bool, deterministic: bool, allow_tf32: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_convolution_transpose(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
-                padding.ptr, @intCast(padding.len),
-                output_padding.ptr, @intCast(output_padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups,
                 if (benchmark)  1  else  0,
                 if (deterministic)  1  else  0,
@@ -10741,16 +10741,16 @@ pub const Tensor = struct {
     }
 
     pub fn cudnnConvolutionTransposeOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, padding: []i64, output_padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool, allow_tf32: bool
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, padding: []const i64, output_padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64, benchmark: bool, deterministic: bool, allow_tf32: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cudnn_convolution_transpose_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
-                padding.ptr, @intCast(padding.len),
-                output_padding.ptr, @intCast(output_padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups,
                 if (benchmark)  1  else  0,
                 if (deterministic)  1  else  0,
@@ -11172,11 +11172,11 @@ pub const Tensor = struct {
     }
 
     pub fn diagonalBackward(
-        grad_output: *const Tensor, input_sizes: []i64, offset: i64, dim1: i64, dim2: i64
+        grad_output: *const Tensor, input_sizes: []const i64, offset: i64, dim1: i64, dim2: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_diagonal_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
-                input_sizes.ptr, @intCast(input_sizes.len),
+                @constCast(input_sizes.ptr), @intCast(input_sizes.len),
                 offset,
                 dim1,
                 dim2);
@@ -11185,12 +11185,12 @@ pub const Tensor = struct {
     }
 
     pub fn diagonalBackwardOut(
-        out: *const Tensor, grad_output: *const Tensor, input_sizes: []i64, offset: i64, dim1: i64, dim2: i64
+        out: *const Tensor, grad_output: *const Tensor, input_sizes: []const i64, offset: i64, dim1: i64, dim2: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_diagonal_backward_out(@ptrCast(&c_tensors), out.c_tensor,
                 grad_output.c_tensor,
-                input_sizes.ptr, @intCast(input_sizes.len),
+                @constCast(input_sizes.ptr), @intCast(input_sizes.len),
                 offset,
                 dim1,
                 dim2);
@@ -11364,7 +11364,7 @@ pub const Tensor = struct {
         __c.atg_div_out_mode(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 other.c_tensor,
-                rounding_mode.ptr, rounding_mode.len);
+                @constCast(rounding_mode.ptr), @intCast(rounding_mode.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11395,7 +11395,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_scalar_mode(@ptrCast(&c_tensors), self.c_tensor,
                 other.into().c_scalar,
-                rounding_mode.ptr, rounding_mode.len);
+                @constCast(rounding_mode.ptr), @intCast(rounding_mode.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11406,7 +11406,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_scalar_mode_(@ptrCast(&c_tensors), self.c_tensor,
                 other.into().c_scalar,
-                rounding_mode.ptr, rounding_mode.len);
+                @constCast(rounding_mode.ptr), @intCast(rounding_mode.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11418,7 +11418,7 @@ pub const Tensor = struct {
         __c.atg_div_scalar_mode_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 other.into().c_scalar,
-                rounding_mode.ptr, rounding_mode.len);
+                @constCast(rounding_mode.ptr), @intCast(rounding_mode.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11440,7 +11440,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_tensor_mode(@ptrCast(&c_tensors), self.c_tensor,
                 other.c_tensor,
-                rounding_mode.ptr, rounding_mode.len);
+                @constCast(rounding_mode.ptr), @intCast(rounding_mode.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11451,7 +11451,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_tensor_mode_(@ptrCast(&c_tensors), self.c_tensor,
                 other.c_tensor,
-                rounding_mode.ptr, rounding_mode.len);
+                @constCast(rounding_mode.ptr), @intCast(rounding_mode.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11494,7 +11494,7 @@ pub const Tensor = struct {
         __c.atg_divide_out_mode(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 other.c_tensor,
-                rounding_mode.ptr, rounding_mode.len);
+                @constCast(rounding_mode.ptr), @intCast(rounding_mode.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11525,7 +11525,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_divide_scalar_mode(@ptrCast(&c_tensors), self.c_tensor,
                 other.into().c_scalar,
-                rounding_mode.ptr, rounding_mode.len);
+                @constCast(rounding_mode.ptr), @intCast(rounding_mode.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11536,7 +11536,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_divide_scalar_mode_(@ptrCast(&c_tensors), self.c_tensor,
                 other.into().c_scalar,
-                rounding_mode.ptr, rounding_mode.len);
+                @constCast(rounding_mode.ptr), @intCast(rounding_mode.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11547,7 +11547,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_divide_tensor_mode(@ptrCast(&c_tensors), self.c_tensor,
                 other.c_tensor,
-                rounding_mode.ptr, rounding_mode.len);
+                @constCast(rounding_mode.ptr), @intCast(rounding_mode.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11558,7 +11558,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_divide_tensor_mode_(@ptrCast(&c_tensors), self.c_tensor,
                 other.c_tensor,
-                rounding_mode.ptr, rounding_mode.len);
+                @constCast(rounding_mode.ptr), @intCast(rounding_mode.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11623,10 +11623,10 @@ pub const Tensor = struct {
     }
 
     pub fn dsplitArray(
-        self: *const Tensor, indices_: []i64
+        self: *const Tensor, indices_: []const i64
     ) []Tensor {
         const c_tensors = __c.atg_dsplit_array(self.c_tensor,
-                indices_.ptr, @intCast(indices_.len));
+                @constCast(indices_.ptr), @intCast(indices_.len));
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
         while (true) {
@@ -11661,9 +11661,9 @@ pub const Tensor = struct {
         equation: []const u8, tensors: []*const Tensor, path: ?[]i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_einsum(@ptrCast(&c_tensors), equation.ptr, equation.len,
+        __c.atg_einsum(@ptrCast(&c_tensors), @constCast(equation.ptr), @intCast(equation.len),
                 ptrList(tensors).ptr, @intCast(tensors.len),
-                path.ptr, @intCast(path.len));
+                @constCast(path.ptr), @intCast(path.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11780,7 +11780,7 @@ pub const Tensor = struct {
                 if (sparse)  1  else  0,
                 if (per_sample_weights != null) per_sample_weights.?.c_tensor else null,
                 if (include_last_offset)  1  else  0,
-                padding_idx orelse 0, (padding_idx == null));
+                padding_idx orelse 0, @intFromBool(padding_idx == null));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }, Tensor { .c_tensor = c_tensors[3] }};
     }
@@ -11877,10 +11877,10 @@ pub const Tensor = struct {
     }
 
     pub fn empty(
-        size_: []i64, options_: TensorOptions
+        size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_empty(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
+        __c.atg_empty(@ptrCast(&c_tensors), @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -11906,42 +11906,42 @@ pub const Tensor = struct {
     }
 
     pub fn emptyOut(
-        out: *const Tensor, size_: []i64
+        out: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_empty_out(@ptrCast(&c_tensors), out.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn emptyPermuted(
-        size_: []i64, physical_layout: []i64, options_: TensorOptions
+        size_: []const i64, physical_layout: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_empty_permuted(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
-                physical_layout.ptr, @intCast(physical_layout.len),
+        __c.atg_empty_permuted(@ptrCast(&c_tensors), @constCast(size_.ptr), @intCast(size_.len),
+                @constCast(physical_layout.ptr), @intCast(physical_layout.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn emptyPermutedOut(
-        out: *const Tensor, size_: []i64, physical_layout: []i64
+        out: *const Tensor, size_: []const i64, physical_layout: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_empty_permuted_out(@ptrCast(&c_tensors), out.c_tensor,
-                size_.ptr, @intCast(size_.len),
-                physical_layout.ptr, @intCast(physical_layout.len));
+                @constCast(size_.ptr), @intCast(size_.len),
+                @constCast(physical_layout.ptr), @intCast(physical_layout.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn emptyQuantized(
-        size_: []i64, qtensor: *const Tensor, options_: TensorOptions
+        size_: []const i64, qtensor: *const Tensor, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_empty_quantized(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
+        __c.atg_empty_quantized(@ptrCast(&c_tensors), @constCast(size_.ptr), @intCast(size_.len),
                 qtensor.c_tensor,
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
@@ -11949,34 +11949,34 @@ pub const Tensor = struct {
     }
 
     pub fn emptyQuantizedOut(
-        out: *const Tensor, size_: []i64, qtensor: *const Tensor
+        out: *const Tensor, size_: []const i64, qtensor: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_empty_quantized_out(@ptrCast(&c_tensors), out.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 qtensor.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn emptyStrided(
-        size_: []i64, stride_: []i64, options_: TensorOptions
+        size_: []const i64, stride_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_empty_strided(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
-                stride_.ptr, @intCast(stride_.len),
+        __c.atg_empty_strided(@ptrCast(&c_tensors), @constCast(size_.ptr), @intCast(size_.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn emptyStridedOut(
-        out: *const Tensor, size_: []i64, stride_: []i64
+        out: *const Tensor, size_: []const i64, stride_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_empty_strided_out(@ptrCast(&c_tensors), out.c_tensor,
-                size_.ptr, @intCast(size_.len),
-                stride_.ptr, @intCast(stride_.len));
+                @constCast(size_.ptr), @intCast(size_.len),
+                @constCast(stride_.ptr), @intCast(stride_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12193,11 +12193,11 @@ pub const Tensor = struct {
     }
 
     pub fn expand(
-        self: *const Tensor, size_: []i64, implicit: bool
+        self: *const Tensor, size_: []const i64, implicit: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_expand(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 if (implicit)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -12214,23 +12214,23 @@ pub const Tensor = struct {
     }
 
     pub fn expandCopy(
-        self: *const Tensor, size_: []i64, implicit: bool
+        self: *const Tensor, size_: []const i64, implicit: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_expand_copy(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 if (implicit)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn expandCopyOut(
-        self: *const Tensor, out: *const Tensor, size_: []i64, implicit: bool
+        self: *const Tensor, out: *const Tensor, size_: []const i64, implicit: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_expand_copy_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 if (implicit)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -12585,34 +12585,34 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fft(@ptrCast(&c_tensors), self.c_tensor,
-                n orelse 0, (n == null),
+                n orelse 0, @intFromBool(n == null),
                 dim_,
-                norm_.ptr, norm_.len);
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fftFft2(
-        self: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
+        self: *const Tensor, s: ?[]i64, dim_: []const i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fft2(@ptrCast(&c_tensors), self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fftFft2Out(
-        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
+        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: []const i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fft2_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12623,9 +12623,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fft_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                n orelse 0, (n == null),
+                n orelse 0, @intFromBool(n == null),
                 dim_,
-                norm_.ptr, norm_.len);
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12657,9 +12657,9 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fftn(@ptrCast(&c_tensors), self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12670,9 +12670,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fftn_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12682,7 +12682,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fftshift(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len));
+                @constCast(dim_.ptr), @intCast(dim_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12692,34 +12692,34 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_hfft(@ptrCast(&c_tensors), self.c_tensor,
-                n orelse 0, (n == null),
+                n orelse 0, @intFromBool(n == null),
                 dim_,
-                norm_.ptr, norm_.len);
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fftHfft2(
-        self: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
+        self: *const Tensor, s: ?[]i64, dim_: []const i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_hfft2(@ptrCast(&c_tensors), self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fftHfft2Out(
-        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
+        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: []const i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_hfft2_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12730,9 +12730,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_hfft_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                n orelse 0, (n == null),
+                n orelse 0, @intFromBool(n == null),
                 dim_,
-                norm_.ptr, norm_.len);
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12742,9 +12742,9 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_hfftn(@ptrCast(&c_tensors), self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12755,9 +12755,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_hfftn_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12767,34 +12767,34 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ifft(@ptrCast(&c_tensors), self.c_tensor,
-                n orelse 0, (n == null),
+                n orelse 0, @intFromBool(n == null),
                 dim_,
-                norm_.ptr, norm_.len);
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fftIfft2(
-        self: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
+        self: *const Tensor, s: ?[]i64, dim_: []const i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ifft2(@ptrCast(&c_tensors), self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fftIfft2Out(
-        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
+        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: []const i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ifft2_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12805,9 +12805,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ifft_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                n orelse 0, (n == null),
+                n orelse 0, @intFromBool(n == null),
                 dim_,
-                norm_.ptr, norm_.len);
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12817,9 +12817,9 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ifftn(@ptrCast(&c_tensors), self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12830,9 +12830,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ifftn_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12842,7 +12842,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ifftshift(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len));
+                @constCast(dim_.ptr), @intCast(dim_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12852,34 +12852,34 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ihfft(@ptrCast(&c_tensors), self.c_tensor,
-                n orelse 0, (n == null),
+                n orelse 0, @intFromBool(n == null),
                 dim_,
-                norm_.ptr, norm_.len);
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fftIhfft2(
-        self: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
+        self: *const Tensor, s: ?[]i64, dim_: []const i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ihfft2(@ptrCast(&c_tensors), self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fftIhfft2Out(
-        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
+        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: []const i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ihfft2_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12890,9 +12890,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ihfft_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                n orelse 0, (n == null),
+                n orelse 0, @intFromBool(n == null),
                 dim_,
-                norm_.ptr, norm_.len);
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12902,9 +12902,9 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ihfftn(@ptrCast(&c_tensors), self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12915,9 +12915,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ihfftn_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12927,34 +12927,34 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_irfft(@ptrCast(&c_tensors), self.c_tensor,
-                n orelse 0, (n == null),
+                n orelse 0, @intFromBool(n == null),
                 dim_,
-                norm_.ptr, norm_.len);
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fftIrfft2(
-        self: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
+        self: *const Tensor, s: ?[]i64, dim_: []const i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_irfft2(@ptrCast(&c_tensors), self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fftIrfft2Out(
-        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
+        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: []const i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_irfft2_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12965,9 +12965,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_irfft_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                n orelse 0, (n == null),
+                n orelse 0, @intFromBool(n == null),
                 dim_,
-                norm_.ptr, norm_.len);
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12977,9 +12977,9 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_irfftn(@ptrCast(&c_tensors), self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12990,9 +12990,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_irfftn_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13002,34 +13002,34 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_rfft(@ptrCast(&c_tensors), self.c_tensor,
-                n orelse 0, (n == null),
+                n orelse 0, @intFromBool(n == null),
                 dim_,
-                norm_.ptr, norm_.len);
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fftRfft2(
-        self: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
+        self: *const Tensor, s: ?[]i64, dim_: []const i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_rfft2(@ptrCast(&c_tensors), self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fftRfft2Out(
-        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: []i64, norm_: []const u8
+        self: *const Tensor, out: *const Tensor, s: ?[]i64, dim_: []const i64, norm_: []const u8
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_rfft2_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13040,9 +13040,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_rfft_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                n orelse 0, (n == null),
+                n orelse 0, @intFromBool(n == null),
                 dim_,
-                norm_.ptr, norm_.len);
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13074,9 +13074,9 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_rfftn(@ptrCast(&c_tensors), self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13087,9 +13087,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_rfftn_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                s.ptr, @intCast(s.len),
-                dim_.ptr, @intCast(dim_.len),
-                norm_.ptr, norm_.len);
+                @constCast(s.ptr), @intCast(s.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(norm_.ptr), @intCast(norm_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13216,22 +13216,22 @@ pub const Tensor = struct {
     }
 
     pub fn flip(
-        self: *const Tensor, dims: []i64
+        self: *const Tensor, dims: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_flip(@ptrCast(&c_tensors), self.c_tensor,
-                dims.ptr, @intCast(dims.len));
+                @constCast(dims.ptr), @intCast(dims.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn flipOut(
-        self: *const Tensor, out: *const Tensor, dims: []i64
+        self: *const Tensor, out: *const Tensor, dims: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_flip_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dims.ptr, @intCast(dims.len));
+                @constCast(dims.ptr), @intCast(dims.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13560,106 +13560,106 @@ pub const Tensor = struct {
     }
 
     pub fn fractionalMaxPool2d(
-        self: *const Tensor, kernel_size: []i64, output_size: []i64, random_samples: *const Tensor
+        self: *const Tensor, kernel_size: []const i64, output_size: []const i64, random_samples: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_fractional_max_pool2d(@ptrCast(&c_tensors), self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 random_samples.c_tensor);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
 
     pub fn fractionalMaxPool2dBackward(
-        self: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, output_size: []i64, indices_: *const Tensor
+        self: *const Tensor, grad_output: *const Tensor, kernel_size: []const i64, output_size: []const i64, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fractional_max_pool2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 indices_.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fractionalMaxPool2dBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, output_size: []i64, indices_: *const Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, kernel_size: []const i64, output_size: []const i64, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fractional_max_pool2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 indices_.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fractionalMaxPool2dOutput(
-        self: *const Tensor, output: *const Tensor, indices_: *const Tensor, kernel_size: []i64, output_size: []i64, random_samples: *const Tensor
+        self: *const Tensor, output: *const Tensor, indices_: *const Tensor, kernel_size: []const i64, output_size: []const i64, random_samples: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_fractional_max_pool2d_output(@ptrCast(&c_tensors), output.c_tensor,
                 indices_.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 random_samples.c_tensor);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
 
     pub fn fractionalMaxPool3d(
-        self: *const Tensor, kernel_size: []i64, output_size: []i64, random_samples: *const Tensor
+        self: *const Tensor, kernel_size: []const i64, output_size: []const i64, random_samples: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_fractional_max_pool3d(@ptrCast(&c_tensors), self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 random_samples.c_tensor);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
 
     pub fn fractionalMaxPool3dBackward(
-        self: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, output_size: []i64, indices_: *const Tensor
+        self: *const Tensor, grad_output: *const Tensor, kernel_size: []const i64, output_size: []const i64, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fractional_max_pool3d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 indices_.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fractionalMaxPool3dBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, output_size: []i64, indices_: *const Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, kernel_size: []const i64, output_size: []const i64, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fractional_max_pool3d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 indices_.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn fractionalMaxPool3dOutput(
-        self: *const Tensor, output: *const Tensor, indices_: *const Tensor, kernel_size: []i64, output_size: []i64, random_samples: *const Tensor
+        self: *const Tensor, output: *const Tensor, indices_: *const Tensor, kernel_size: []const i64, output_size: []const i64, random_samples: *const Tensor
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_fractional_max_pool3d_output(@ptrCast(&c_tensors), output.c_tensor,
                 indices_.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 random_samples.c_tensor);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
@@ -13686,23 +13686,23 @@ pub const Tensor = struct {
     }
 
     pub fn frobeniusNorm(
-        self: *const Tensor, dim_: []i64, keepdim: bool
+        self: *const Tensor, dim_: []const i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_frobenius_norm(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn frobeniusNormOut(
-        self: *const Tensor, out: *const Tensor, dim_: []i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: []const i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_frobenius_norm_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -13712,9 +13712,9 @@ pub const Tensor = struct {
         filename: []const u8, shared: bool, size_: ?i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_from_file(@ptrCast(&c_tensors), filename.ptr, filename.len,
+        __c.atg_from_file(@ptrCast(&c_tensors), @constCast(filename.ptr), @intCast(filename.len),
                 if (shared)  1  else  0,
-                size_ orelse 0, (size_ == null),
+                size_ orelse 0, @intFromBool(size_ == null),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -13725,18 +13725,18 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_from_file_out(@ptrCast(&c_tensors), out.c_tensor,
-                filename.ptr, filename.len,
+                @constCast(filename.ptr), @intCast(filename.len),
                 if (shared)  1  else  0,
-                size_ orelse 0, (size_ == null));
+                size_ orelse 0, @intFromBool(size_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn full(
-        size_: []i64, fill_value: Scalar, options_: TensorOptions
+        size_: []const i64, fill_value: Scalar, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_full(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
+        __c.atg_full(@ptrCast(&c_tensors), @constCast(size_.ptr), @intCast(size_.len),
                 fill_value.into().c_scalar,
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
@@ -13765,11 +13765,11 @@ pub const Tensor = struct {
     }
 
     pub fn fullOut(
-        out: *const Tensor, size_: []i64, fill_value: Scalar
+        out: *const Tensor, size_: []const i64, fill_value: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_full_out(@ptrCast(&c_tensors), out.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 fill_value.into().c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -13932,7 +13932,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gelu(@ptrCast(&c_tensors), self.c_tensor,
-                approximate.ptr, approximate.len);
+                @constCast(approximate.ptr), @intCast(approximate.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13942,7 +13942,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gelu_(@ptrCast(&c_tensors), self.c_tensor,
-                approximate.ptr, approximate.len);
+                @constCast(approximate.ptr), @intCast(approximate.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13953,7 +13953,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gelu_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                approximate.ptr, approximate.len);
+                @constCast(approximate.ptr), @intCast(approximate.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13965,7 +13965,7 @@ pub const Tensor = struct {
         __c.atg_gelu_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                approximate.ptr, approximate.len);
+                @constCast(approximate.ptr), @intCast(approximate.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13976,7 +13976,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gelu_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                approximate.ptr, approximate.len);
+                @constCast(approximate.ptr), @intCast(approximate.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -14840,7 +14840,7 @@ pub const Tensor = struct {
         __c.atg_hinge_embedding_loss(@ptrCast(&c_tensors), self.c_tensor,
                 target.c_tensor,
                 margin,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -14884,7 +14884,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_histogram_bin_ct(@ptrCast(&c_tensors), self.c_tensor,
                 bins,
-                range_.ptr, @intCast(range_.len),
+                @constCast(range_.ptr), @intCast(range_.len),
                 if (weight != null) weight.?.c_tensor else null,
                 if (density)  1  else  0);
         torch.readAndCleanError();
@@ -14899,7 +14899,7 @@ pub const Tensor = struct {
                 bin_edges.c_tensor,
                 self.c_tensor,
                 bins,
-                range_.ptr, @intCast(range_.len),
+                @constCast(range_.ptr), @intCast(range_.len),
                 if (weight != null) weight.?.c_tensor else null,
                 if (density)  1  else  0);
         torch.readAndCleanError();
@@ -14937,10 +14937,10 @@ pub const Tensor = struct {
     }
 
     pub fn hsplitArray(
-        self: *const Tensor, indices_: []i64
+        self: *const Tensor, indices_: []const i64
     ) []Tensor {
         const c_tensors = __c.atg_hsplit_array(self.c_tensor,
-                indices_.ptr, @intCast(indices_.len));
+                @constCast(indices_.ptr), @intCast(indices_.len));
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
         while (true) {
@@ -14998,7 +14998,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_huber_loss(@ptrCast(&c_tensors), self.c_tensor,
                 target.c_tensor,
-                reduction.to_int(),
+                reduction.toInt(),
                 delta);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -15011,7 +15011,7 @@ pub const Tensor = struct {
         __c.atg_huber_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
                 target.c_tensor,
-                reduction.to_int(),
+                reduction.toInt(),
                 delta);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -15025,7 +15025,7 @@ pub const Tensor = struct {
                 grad_output.c_tensor,
                 self.c_tensor,
                 target.c_tensor,
-                reduction.to_int(),
+                reduction.toInt(),
                 delta);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -15038,7 +15038,7 @@ pub const Tensor = struct {
         __c.atg_huber_loss_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 target.c_tensor,
-                reduction.to_int(),
+                reduction.toInt(),
                 delta);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -15166,28 +15166,28 @@ pub const Tensor = struct {
     }
 
     pub fn im2col(
-        self: *const Tensor, kernel_size: []i64, dilation: []i64, padding: []i64, stride_: []i64
+        self: *const Tensor, kernel_size: []const i64, dilation: []const i64, padding: []const i64, stride_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_im2col(@ptrCast(&c_tensors), self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                dilation.ptr, @intCast(dilation.len),
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len));
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn im2colOut(
-        self: *const Tensor, out: *const Tensor, kernel_size: []i64, dilation: []i64, padding: []i64, stride_: []i64
+        self: *const Tensor, out: *const Tensor, kernel_size: []const i64, dilation: []const i64, padding: []const i64, stride_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_im2col_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                dilation.ptr, @intCast(dilation.len),
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len));
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -15404,7 +15404,7 @@ pub const Tensor = struct {
                 dim_,
                 index_.c_tensor,
                 source.c_tensor,
-                reduce.ptr, reduce.len,
+                @constCast(reduce.ptr), @intCast(reduce.len),
                 if (include_self)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -15418,7 +15418,7 @@ pub const Tensor = struct {
                 dim_,
                 index_.c_tensor,
                 source.c_tensor,
-                reduce.ptr, reduce.len,
+                @constCast(reduce.ptr), @intCast(reduce.len),
                 if (include_self)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -15433,7 +15433,7 @@ pub const Tensor = struct {
                 dim_,
                 index_.c_tensor,
                 source.c_tensor,
-                reduce.ptr, reduce.len,
+                @constCast(reduce.ptr), @intCast(reduce.len),
                 if (include_self)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -15451,11 +15451,11 @@ pub const Tensor = struct {
     }
 
     pub fn indexSelectBackward(
-        gradient: *const Tensor, self_sizes: []i64, dim_: i64, index_: *const Tensor
+        gradient: *const Tensor, self_sizes: []const i64, dim_: i64, index_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_select_backward(@ptrCast(&c_tensors), gradient.c_tensor,
-                self_sizes.ptr, @intCast(self_sizes.len),
+                @constCast(self_sizes.ptr), @intCast(self_sizes.len),
                 dim_,
                 index_.c_tensor);
         torch.readAndCleanError();
@@ -15902,13 +15902,13 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_istft(@ptrCast(&c_tensors), self.c_tensor,
                 n_fft,
-                hop_length orelse 0, (hop_length == null),
-                win_length orelse 0, (win_length == null),
+                hop_length orelse 0, @intFromBool(hop_length == null),
+                win_length orelse 0, @intFromBool(win_length == null),
                 if (window != null) window.?.c_tensor else null,
                 if (center)  1  else  0,
                 if (normalized)  1  else  0,
                 if (onesided)  1  else  0,
-                length orelse 0, (length == null),
+                length orelse 0, @intFromBool(length == null),
                 if (return_complex)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -15986,7 +15986,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_kl_div(@ptrCast(&c_tensors), self.c_tensor,
                 target.c_tensor,
-                reduction.to_int(),
+                reduction.toInt(),
                 if (log_target)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -16045,17 +16045,17 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_l1_loss(@ptrCast(&c_tensors), self.c_tensor,
                 target.c_tensor,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn layerNorm(
-        self: *const Tensor, normalized_shape: []i64, weight: ?*const Tensor, bias: ?*const Tensor, eps: f64, cudnn_enable: bool
+        self: *const Tensor, normalized_shape: []const i64, weight: ?*const Tensor, bias: ?*const Tensor, eps: f64, cudnn_enable: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_layer_norm(@ptrCast(&c_tensors), self.c_tensor,
-                normalized_shape.ptr, @intCast(normalized_shape.len),
+                @constCast(normalized_shape.ptr), @intCast(normalized_shape.len),
                 if (weight != null) weight.?.c_tensor else null,
                 if (bias != null) bias.?.c_tensor else null,
                 eps,
@@ -16579,7 +16579,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_cond_p_str(@ptrCast(&c_tensors), self.c_tensor,
-                p.ptr, p.len);
+                @constCast(p.ptr), @intCast(p.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -16590,7 +16590,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_cond_p_str_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                p.ptr, p.len);
+                @constCast(p.ptr), @intCast(p.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -16674,7 +16674,7 @@ pub const Tensor = struct {
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_linalg_eigh(@ptrCast(&c_tensors), self.c_tensor,
-                uplo.ptr, uplo.len);
+                @constCast(uplo.ptr), @intCast(uplo.len));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
@@ -16686,7 +16686,7 @@ pub const Tensor = struct {
         __c.atg_linalg_eigh_eigvals(@ptrCast(&c_tensors), eigvals.c_tensor,
                 eigvecs.c_tensor,
                 self.c_tensor,
-                uplo.ptr, uplo.len);
+                @constCast(uplo.ptr), @intCast(uplo.len));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
@@ -16715,7 +16715,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_eigvalsh(@ptrCast(&c_tensors), self.c_tensor,
-                uplo.ptr, uplo.len);
+                @constCast(uplo.ptr), @intCast(uplo.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -16726,7 +16726,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_eigvalsh_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                uplo.ptr, uplo.len);
+                @constCast(uplo.ptr), @intCast(uplo.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -16871,8 +16871,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg_linalg_lstsq(@ptrCast(&c_tensors), self.c_tensor,
                 b.c_tensor,
-                rcond orelse std.math.nan, (rcond == null),
-                driver.ptr, driver.len);
+                rcond orelse std.math.nan(f64), @intFromBool(rcond == null),
+                @constCast(driver.ptr), @intCast(driver.len));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }, Tensor { .c_tensor = c_tensors[3] }};
     }
@@ -16887,8 +16887,8 @@ pub const Tensor = struct {
                 singular_values.c_tensor,
                 self.c_tensor,
                 b.c_tensor,
-                rcond orelse std.math.nan, (rcond == null),
-                driver.ptr, driver.len);
+                rcond orelse std.math.nan(f64), @intFromBool(rcond == null),
+                @constCast(driver.ptr), @intCast(driver.len));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }, Tensor { .c_tensor = c_tensors[3] }};
     }
@@ -17067,8 +17067,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_matrix_rank_atol_rtol_float(@ptrCast(&c_tensors), self.c_tensor,
-                atol orelse std.math.nan, (atol == null),
-                rtol orelse std.math.nan, (rtol == null),
+                atol orelse std.math.nan(f64), @intFromBool(atol == null),
+                rtol orelse std.math.nan(f64), @intFromBool(rtol == null),
                 if (hermitian)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -17080,8 +17080,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_matrix_rank_atol_rtol_float_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                atol orelse std.math.nan, (atol == null),
-                rtol orelse std.math.nan, (rtol == null),
+                atol orelse std.math.nan(f64), @intFromBool(atol == null),
+                rtol orelse std.math.nan(f64), @intFromBool(rtol == null),
                 if (hermitian)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -17172,7 +17172,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_norm(@ptrCast(&c_tensors), self.c_tensor,
                 ord.into().c_scalar,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
         torch.readAndCleanError();
@@ -17184,8 +17184,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_norm_ord_str(@ptrCast(&c_tensors), self.c_tensor,
-                ord.ptr, ord.len,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(ord.ptr), @intCast(ord.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
         torch.readAndCleanError();
@@ -17198,8 +17198,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_norm_ord_str_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                ord.ptr, ord.len,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(ord.ptr), @intCast(ord.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
         torch.readAndCleanError();
@@ -17213,7 +17213,7 @@ pub const Tensor = struct {
         __c.atg_linalg_norm_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 ord.into().c_scalar,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
         torch.readAndCleanError();
@@ -17236,8 +17236,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_pinv_atol_rtol_float(@ptrCast(&c_tensors), self.c_tensor,
-                atol orelse std.math.nan, (atol == null),
-                rtol orelse std.math.nan, (rtol == null),
+                atol orelse std.math.nan(f64), @intFromBool(atol == null),
+                rtol orelse std.math.nan(f64), @intFromBool(rtol == null),
                 if (hermitian)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -17249,8 +17249,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_pinv_atol_rtol_float_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                atol orelse std.math.nan, (atol == null),
-                rtol orelse std.math.nan, (rtol == null),
+                atol orelse std.math.nan(f64), @intFromBool(atol == null),
+                rtol orelse std.math.nan(f64), @intFromBool(rtol == null),
                 if (hermitian)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -17321,7 +17321,7 @@ pub const Tensor = struct {
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_linalg_qr(@ptrCast(&c_tensors), a.c_tensor,
-                mode_.ptr, mode_.len);
+                @constCast(mode_.ptr), @intCast(mode_.len));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
@@ -17333,7 +17333,7 @@ pub const Tensor = struct {
         __c.atg_linalg_qr_out(@ptrCast(&c_tensors), q.c_tensor,
                 r.c_tensor,
                 a.c_tensor,
-                mode_.ptr, mode_.len);
+                @constCast(mode_.ptr), @intCast(mode_.len));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
@@ -17440,7 +17440,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_linalg_svd(@ptrCast(&c_tensors), a.c_tensor,
                 if (full_matrices)  1  else  0,
-                driver.ptr, driver.len);
+                @constCast(driver.ptr), @intCast(driver.len));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }};
     }
@@ -17454,7 +17454,7 @@ pub const Tensor = struct {
                 vh.c_tensor,
                 a.c_tensor,
                 if (full_matrices)  1  else  0,
-                driver.ptr, driver.len);
+                @constCast(driver.ptr), @intCast(driver.len));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }};
     }
@@ -17464,7 +17464,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_svdvals(@ptrCast(&c_tensors), a.c_tensor,
-                driver.ptr, driver.len);
+                @constCast(driver.ptr), @intCast(driver.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -17475,7 +17475,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_svdvals_out(@ptrCast(&c_tensors), out.c_tensor,
                 a.c_tensor,
-                driver.ptr, driver.len);
+                @constCast(driver.ptr), @intCast(driver.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -17507,7 +17507,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_tensorsolve(@ptrCast(&c_tensors), self.c_tensor,
                 other.c_tensor,
-                dims.ptr, @intCast(dims.len));
+                @constCast(dims.ptr), @intCast(dims.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -17519,7 +17519,7 @@ pub const Tensor = struct {
         __c.atg_linalg_tensorsolve_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 other.c_tensor,
-                dims.ptr, @intCast(dims.len));
+                @constCast(dims.ptr), @intCast(dims.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -17529,7 +17529,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_vander(@ptrCast(&c_tensors), x.c_tensor,
-                n orelse 0, (n == null));
+                n orelse 0, @intFromBool(n == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -18085,7 +18085,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logit(@ptrCast(&c_tensors), self.c_tensor,
-                eps orelse std.math.nan, (eps == null));
+                eps orelse std.math.nan(f64), @intFromBool(eps == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -18095,7 +18095,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logit_(@ptrCast(&c_tensors), self.c_tensor,
-                eps orelse std.math.nan, (eps == null));
+                eps orelse std.math.nan(f64), @intFromBool(eps == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -18106,7 +18106,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logit_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                eps orelse std.math.nan, (eps == null));
+                eps orelse std.math.nan(f64), @intFromBool(eps == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -18118,7 +18118,7 @@ pub const Tensor = struct {
         __c.atg_logit_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                eps orelse std.math.nan, (eps == null));
+                eps orelse std.math.nan(f64), @intFromBool(eps == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -18129,7 +18129,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logit_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                eps orelse std.math.nan, (eps == null));
+                eps orelse std.math.nan(f64), @intFromBool(eps == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -18239,23 +18239,23 @@ pub const Tensor = struct {
     }
 
     pub fn logsumexp(
-        self: *const Tensor, dim_: []i64, keepdim: bool
+        self: *const Tensor, dim_: []const i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logsumexp(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn logsumexpOut(
-        self: *const Tensor, out: *const Tensor, dim_: []i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: []const i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logsumexp_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -18454,7 +18454,7 @@ pub const Tensor = struct {
                 input2.c_tensor,
                 target.c_tensor,
                 margin,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -18550,12 +18550,12 @@ pub const Tensor = struct {
     }
 
     pub fn maskedScatterBackward(
-        grad_output: *const Tensor, mask: *const Tensor, sizes: []i64
+        grad_output: *const Tensor, mask: *const Tensor, sizes: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_masked_scatter_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 mask.c_tensor,
-                sizes.ptr, @intCast(sizes.len));
+                @constCast(sizes.ptr), @intCast(sizes.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -18729,102 +18729,102 @@ pub const Tensor = struct {
     }
 
     pub fn maxPool1d(
-        self: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_pool1d(@ptrCast(&c_tensors), self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn maxPool1dWithIndices(
-        self: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_max_pool1d_with_indices(@ptrCast(&c_tensors), self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
 
     pub fn maxPool2d(
-        self: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_pool2d(@ptrCast(&c_tensors), self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn maxPool2dBackward(
-        self: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, grad_output: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_pool2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn maxPool2dBackwardOut(
-        self: *const Tensor, out: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, grad_output: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_pool2d_backward_out(@ptrCast(&c_tensors), out.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn maxPool2dWithIndices(
-        self: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_max_pool2d_with_indices(@ptrCast(&c_tensors), self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
 
     pub fn maxPool2dWithIndicesBackward(
-        self: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool, indices_: *const Tensor
+        self: *const Tensor, grad_output: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_pool2d_with_indices_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0,
                 indices_.c_tensor);
         torch.readAndCleanError();
@@ -18832,16 +18832,16 @@ pub const Tensor = struct {
     }
 
     pub fn maxPool2dWithIndicesBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool, indices_: *const Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_pool2d_with_indices_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0,
                 indices_.c_tensor);
         torch.readAndCleanError();
@@ -18849,59 +18849,59 @@ pub const Tensor = struct {
     }
 
     pub fn maxPool2dWithIndicesOut(
-        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_max_pool2d_with_indices_out(@ptrCast(&c_tensors), out.c_tensor,
                 indices_.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
 
     pub fn maxPool3d(
-        self: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_pool3d(@ptrCast(&c_tensors), self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn maxPool3dWithIndices(
-        self: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_max_pool3d_with_indices(@ptrCast(&c_tensors), self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
 
     pub fn maxPool3dWithIndicesBackward(
-        self: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool, indices_: *const Tensor
+        self: *const Tensor, grad_output: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_pool3d_with_indices_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0,
                 indices_.c_tensor);
         torch.readAndCleanError();
@@ -18909,16 +18909,16 @@ pub const Tensor = struct {
     }
 
     pub fn maxPool3dWithIndicesBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool, indices_: *const Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool, indices_: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_pool3d_with_indices_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0,
                 indices_.c_tensor);
         torch.readAndCleanError();
@@ -18926,16 +18926,16 @@ pub const Tensor = struct {
     }
 
     pub fn maxPool3dWithIndicesOut(
-        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_max_pool3d_with_indices_out(@ptrCast(&c_tensors), out.c_tensor,
                 indices_.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
@@ -18952,51 +18952,51 @@ pub const Tensor = struct {
     }
 
     pub fn maxUnpool2d(
-        self: *const Tensor, indices_: *const Tensor, output_size: []i64
+        self: *const Tensor, indices_: *const Tensor, output_size: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_unpool2d(@ptrCast(&c_tensors), self.c_tensor,
                 indices_.c_tensor,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn maxUnpool2dOut(
-        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, output_size: []i64
+        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, output_size: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_unpool2d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 indices_.c_tensor,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn maxUnpool3d(
-        self: *const Tensor, indices_: *const Tensor, output_size: []i64, stride_: []i64, padding: []i64
+        self: *const Tensor, indices_: *const Tensor, output_size: []const i64, stride_: []const i64, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_unpool3d(@ptrCast(&c_tensors), self.c_tensor,
                 indices_.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn maxUnpool3dOut(
-        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, output_size: []i64, stride_: []i64, padding: []i64
+        self: *const Tensor, out: *const Tensor, indices_: *const Tensor, output_size: []const i64, stride_: []const i64, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_max_unpool3d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 indices_.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -19037,7 +19037,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mean_dim(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
         torch.readAndCleanError();
@@ -19050,7 +19050,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mean_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
         torch.readAndCleanError();
@@ -19119,7 +19119,7 @@ pub const Tensor = struct {
         tensors: []*const Tensor, indexing: []const u8
     ) []Tensor {
         const c_tensors = __c.atg_meshgrid_indexing(ptrList(tensors).ptr, @intCast(tensors.len),
-                indexing.ptr, indexing.len);
+                @constCast(indexing.ptr), @intCast(indexing.len));
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
         while (true) {
@@ -19296,15 +19296,15 @@ pub const Tensor = struct {
     }
 
     pub fn miopenConvolution(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64, benchmark: bool, deterministic: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_miopen_convolution(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups,
                 if (benchmark)  1  else  0,
                 if (deterministic)  1  else  0);
@@ -19313,7 +19313,7 @@ pub const Tensor = struct {
     }
 
     pub fn miopenConvolutionAddRelu(
-        self: *const Tensor, weight: *const Tensor, z: *const Tensor, alpha: Scalar, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, z: *const Tensor, alpha: Scalar, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_miopen_convolution_add_relu(@ptrCast(&c_tensors), self.c_tensor,
@@ -19321,25 +19321,25 @@ pub const Tensor = struct {
                 z.c_tensor,
                 alpha.into().c_scalar,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn miopenConvolutionOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64, benchmark: bool, deterministic: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_miopen_convolution_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups,
                 if (benchmark)  1  else  0,
                 if (deterministic)  1  else  0);
@@ -19348,31 +19348,31 @@ pub const Tensor = struct {
     }
 
     pub fn miopenConvolutionRelu(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_miopen_convolution_relu(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn miopenConvolutionTranspose(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, output_padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []const i64, output_padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64, benchmark: bool, deterministic: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_miopen_convolution_transpose(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                padding.ptr, @intCast(padding.len),
-                output_padding.ptr, @intCast(output_padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups,
                 if (benchmark)  1  else  0,
                 if (deterministic)  1  else  0);
@@ -19381,17 +19381,17 @@ pub const Tensor = struct {
     }
 
     pub fn miopenConvolutionTransposeOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, output_padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []const i64, output_padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64, benchmark: bool, deterministic: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_miopen_convolution_transpose_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                padding.ptr, @intCast(padding.len),
-                output_padding.ptr, @intCast(output_padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups,
                 if (benchmark)  1  else  0,
                 if (deterministic)  1  else  0);
@@ -19400,15 +19400,15 @@ pub const Tensor = struct {
     }
 
     pub fn miopenDepthwiseConvolution(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64, benchmark: bool, deterministic: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_miopen_depthwise_convolution(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups,
                 if (benchmark)  1  else  0,
                 if (deterministic)  1  else  0);
@@ -19417,16 +19417,16 @@ pub const Tensor = struct {
     }
 
     pub fn miopenDepthwiseConvolutionOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, benchmark: bool, deterministic: bool
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64, benchmark: bool, deterministic: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_miopen_depthwise_convolution_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups,
                 if (benchmark)  1  else  0,
                 if (deterministic)  1  else  0);
@@ -19435,7 +19435,7 @@ pub const Tensor = struct {
     }
 
     pub fn miopenRnn(
-        self: *const Tensor, weight: []*const Tensor, weight_stride0: i64, hx: *const Tensor, cx: ?*const Tensor, mode_: i64, hidden_size: i64, num_layers: i64, batch_first: bool, dropout_: f64, train: bool, bidirectional: bool, batch_sizes: []i64, dropout_state: ?*const Tensor
+        self: *const Tensor, weight: []*const Tensor, weight_stride0: i64, hx: *const Tensor, cx: ?*const Tensor, mode_: i64, hidden_size: i64, num_layers: i64, batch_first: bool, dropout_: f64, train: bool, bidirectional: bool, batch_sizes: []const i64, dropout_state: ?*const Tensor
     ) [5]Tensor {
         var c_tensors = [_]C_tensor{null} ** 5;
         __c.atg_miopen_rnn(@ptrCast(&c_tensors), self.c_tensor,
@@ -19450,14 +19450,14 @@ pub const Tensor = struct {
                 dropout_,
                 if (train)  1  else  0,
                 if (bidirectional)  1  else  0,
-                batch_sizes.ptr, @intCast(batch_sizes.len),
+                @constCast(batch_sizes.ptr), @intCast(batch_sizes.len),
                 if (dropout_state != null) dropout_state.?.c_tensor else null);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }, Tensor { .c_tensor = c_tensors[3] }, Tensor { .c_tensor = c_tensors[4] }};
     }
 
     pub fn miopenRnnOut(
-        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, out3: *const Tensor, out4: *const Tensor, weight: []*const Tensor, weight_stride0: i64, hx: *const Tensor, cx: ?*const Tensor, mode_: i64, hidden_size: i64, num_layers: i64, batch_first: bool, dropout_: f64, train: bool, bidirectional: bool, batch_sizes: []i64, dropout_state: ?*const Tensor
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, out3: *const Tensor, out4: *const Tensor, weight: []*const Tensor, weight_stride0: i64, hx: *const Tensor, cx: ?*const Tensor, mode_: i64, hidden_size: i64, num_layers: i64, batch_first: bool, dropout_: f64, train: bool, bidirectional: bool, batch_sizes: []const i64, dropout_state: ?*const Tensor
     ) [5]Tensor {
         var c_tensors = [_]C_tensor{null} ** 5;
         __c.atg_miopen_rnn_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -19477,7 +19477,7 @@ pub const Tensor = struct {
                 dropout_,
                 if (train)  1  else  0,
                 if (bidirectional)  1  else  0,
-                batch_sizes.ptr, @intCast(batch_sizes.len),
+                @constCast(batch_sizes.ptr), @intCast(batch_sizes.len),
                 if (dropout_state != null) dropout_state.?.c_tensor else null);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }, Tensor { .c_tensor = c_tensors[3] }, Tensor { .c_tensor = c_tensors[4] }};
@@ -19522,11 +19522,11 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnAdaptiveAvgPool2d(
-        self: *const Tensor, output_size: []i64
+        self: *const Tensor, output_size: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_adaptive_avg_pool2d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -19553,42 +19553,42 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnAdaptiveAvgPool2dOut(
-        self: *const Tensor, out: *const Tensor, output_size: []i64
+        self: *const Tensor, out: *const Tensor, output_size: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_adaptive_avg_pool2d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn mkldnnConvolution(
-        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_convolution(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn mkldnnConvolutionOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, bias: ?*const Tensor, padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_convolution_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -19606,10 +19606,10 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnLinearBackwardInput(
-        input_size: []i64, grad_output: *const Tensor, weight: *const Tensor
+        input_size: []const i64, grad_output: *const Tensor, weight: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_mkldnn_linear_backward_input(@ptrCast(&c_tensors), input_size.ptr, @intCast(input_size.len),
+        __c.atg_mkldnn_linear_backward_input(@ptrCast(&c_tensors), @constCast(input_size.ptr), @intCast(input_size.len),
                 grad_output.c_tensor,
                 weight.c_tensor);
         torch.readAndCleanError();
@@ -19617,11 +19617,11 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnLinearBackwardInputOut(
-        out: *const Tensor, input_size: []i64, grad_output: *const Tensor, weight: *const Tensor
+        out: *const Tensor, input_size: []const i64, grad_output: *const Tensor, weight: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_linear_backward_input_out(@ptrCast(&c_tensors), out.c_tensor,
-                input_size.ptr, @intCast(input_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
                 grad_output.c_tensor,
                 weight.c_tensor);
         torch.readAndCleanError();
@@ -19667,187 +19667,187 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnMaxPool2d(
-        self: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_max_pool2d(@ptrCast(&c_tensors), self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn mkldnnMaxPool2dBackward(
-        self: *const Tensor, grad_output: *const Tensor, output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, grad_output: *const Tensor, output: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_max_pool2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 output.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn mkldnnMaxPool2dBackwardOut(
-        self: *const Tensor, out: *const Tensor, grad_output: *const Tensor, output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, grad_output: *const Tensor, output: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_max_pool2d_backward_out(@ptrCast(&c_tensors), out.c_tensor,
                 grad_output.c_tensor,
                 output.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn mkldnnMaxPool2dOut(
-        self: *const Tensor, out: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_max_pool2d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn mkldnnMaxPool3d(
-        self: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_max_pool3d(@ptrCast(&c_tensors), self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn mkldnnMaxPool3dBackward(
-        self: *const Tensor, grad_output: *const Tensor, output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, grad_output: *const Tensor, output: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_max_pool3d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 output.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn mkldnnMaxPool3dBackwardOut(
-        self: *const Tensor, out: *const Tensor, grad_output: *const Tensor, output: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, grad_output: *const Tensor, output: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_max_pool3d_backward_out(@ptrCast(&c_tensors), out.c_tensor,
                 grad_output.c_tensor,
                 output.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn mkldnnMaxPool3dOut(
-        self: *const Tensor, out: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_max_pool3d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn mkldnnReorderConv2dWeight(
-        self: *const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, input_size: ?[]i64
+        self: *const Tensor, padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64, input_size: ?[]i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_reorder_conv2d_weight(@ptrCast(&c_tensors), self.c_tensor,
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups,
-                input_size.ptr, @intCast(input_size.len));
+                @constCast(input_size.ptr), @intCast(input_size.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn mkldnnReorderConv2dWeightOut(
-        self: *const Tensor, out: *const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64, input_size: ?[]i64
+        self: *const Tensor, out: *const Tensor, padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64, input_size: ?[]i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_reorder_conv2d_weight_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups,
-                input_size.ptr, @intCast(input_size.len));
+                @constCast(input_size.ptr), @intCast(input_size.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn mkldnnReorderConv3dWeight(
-        self: *const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_reorder_conv3d_weight(@ptrCast(&c_tensors), self.c_tensor,
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn mkldnnReorderConv3dWeightOut(
-        self: *const Tensor, out: *const Tensor, padding: []i64, stride_: []i64, dilation: []i64, groups: i64
+        self: *const Tensor, out: *const Tensor, padding: []const i64, stride_: []const i64, dilation: []const i64, groups: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mkldnn_reorder_conv3d_weight_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len),
-                stride_.ptr, @intCast(stride_.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 groups);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn mkldnnRnnLayer(
-        self: *const Tensor, weight0: *const Tensor, weight1: *const Tensor, weight2: *const Tensor, weight3: *const Tensor, hx_: *const Tensor, cx_: *const Tensor, reverse: bool, batch_sizes: []i64, mode_: i64, hidden_size: i64, num_layers: i64, has_biases: bool, bidirectional: bool, batch_first: bool, train: bool
+        self: *const Tensor, weight0: *const Tensor, weight1: *const Tensor, weight2: *const Tensor, weight3: *const Tensor, hx_: *const Tensor, cx_: *const Tensor, reverse: bool, batch_sizes: []const i64, mode_: i64, hidden_size: i64, num_layers: i64, has_biases: bool, bidirectional: bool, batch_first: bool, train: bool
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg_mkldnn_rnn_layer(@ptrCast(&c_tensors), self.c_tensor,
@@ -19858,7 +19858,7 @@ pub const Tensor = struct {
                 hx_.c_tensor,
                 cx_.c_tensor,
                 if (reverse)  1  else  0,
-                batch_sizes.ptr, @intCast(batch_sizes.len),
+                @constCast(batch_sizes.ptr), @intCast(batch_sizes.len),
                 mode_,
                 hidden_size,
                 num_layers,
@@ -19871,7 +19871,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnRnnLayerBackward(
-        self: *const Tensor, weight1: *const Tensor, weight2: *const Tensor, weight3: *const Tensor, weight4: *const Tensor, hx_: *const Tensor, cx_tmp: *const Tensor, output: *const Tensor, hy_: *const Tensor, cy_: *const Tensor, grad_output: ?*const Tensor, grad_hy: ?*const Tensor, grad_cy: ?*const Tensor, reverse: bool, mode_: i64, hidden_size: i64, num_layers: i64, has_biases: bool, train: bool, bidirectional: bool, batch_sizes: []i64, batch_first: bool, workspace: *const Tensor
+        self: *const Tensor, weight1: *const Tensor, weight2: *const Tensor, weight3: *const Tensor, weight4: *const Tensor, hx_: *const Tensor, cx_tmp: *const Tensor, output: *const Tensor, hy_: *const Tensor, cy_: *const Tensor, grad_output: ?*const Tensor, grad_hy: ?*const Tensor, grad_cy: ?*const Tensor, reverse: bool, mode_: i64, hidden_size: i64, num_layers: i64, has_biases: bool, train: bool, bidirectional: bool, batch_sizes: []const i64, batch_first: bool, workspace: *const Tensor
     ) [7]Tensor {
         var c_tensors = [_]C_tensor{null} ** 7;
         __c.atg_mkldnn_rnn_layer_backward(@ptrCast(&c_tensors), self.c_tensor,
@@ -19894,7 +19894,7 @@ pub const Tensor = struct {
                 if (has_biases)  1  else  0,
                 if (train)  1  else  0,
                 if (bidirectional)  1  else  0,
-                batch_sizes.ptr, @intCast(batch_sizes.len),
+                @constCast(batch_sizes.ptr), @intCast(batch_sizes.len),
                 if (batch_first)  1  else  0,
                 workspace.c_tensor);
         torch.readAndCleanError();
@@ -19902,7 +19902,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnRnnLayerBackwardOut(
-        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, out3: *const Tensor, out4: *const Tensor, out5: *const Tensor, out6: *const Tensor, weight1: *const Tensor, weight2: *const Tensor, weight3: *const Tensor, weight4: *const Tensor, hx_: *const Tensor, cx_tmp: *const Tensor, output: *const Tensor, hy_: *const Tensor, cy_: *const Tensor, grad_output: ?*const Tensor, grad_hy: ?*const Tensor, grad_cy: ?*const Tensor, reverse: bool, mode_: i64, hidden_size: i64, num_layers: i64, has_biases: bool, train: bool, bidirectional: bool, batch_sizes: []i64, batch_first: bool, workspace: *const Tensor
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, out3: *const Tensor, out4: *const Tensor, out5: *const Tensor, out6: *const Tensor, weight1: *const Tensor, weight2: *const Tensor, weight3: *const Tensor, weight4: *const Tensor, hx_: *const Tensor, cx_tmp: *const Tensor, output: *const Tensor, hy_: *const Tensor, cy_: *const Tensor, grad_output: ?*const Tensor, grad_hy: ?*const Tensor, grad_cy: ?*const Tensor, reverse: bool, mode_: i64, hidden_size: i64, num_layers: i64, has_biases: bool, train: bool, bidirectional: bool, batch_sizes: []const i64, batch_first: bool, workspace: *const Tensor
     ) [7]Tensor {
         var c_tensors = [_]C_tensor{null} ** 7;
         __c.atg_mkldnn_rnn_layer_backward_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -19932,7 +19932,7 @@ pub const Tensor = struct {
                 if (has_biases)  1  else  0,
                 if (train)  1  else  0,
                 if (bidirectional)  1  else  0,
-                batch_sizes.ptr, @intCast(batch_sizes.len),
+                @constCast(batch_sizes.ptr), @intCast(batch_sizes.len),
                 if (batch_first)  1  else  0,
                 workspace.c_tensor);
         torch.readAndCleanError();
@@ -19940,7 +19940,7 @@ pub const Tensor = struct {
     }
 
     pub fn mkldnnRnnLayerOut(
-        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, out3: *const Tensor, weight0: *const Tensor, weight1: *const Tensor, weight2: *const Tensor, weight3: *const Tensor, hx_: *const Tensor, cx_: *const Tensor, reverse: bool, batch_sizes: []i64, mode_: i64, hidden_size: i64, num_layers: i64, has_biases: bool, bidirectional: bool, batch_first: bool, train: bool
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, out3: *const Tensor, weight0: *const Tensor, weight1: *const Tensor, weight2: *const Tensor, weight3: *const Tensor, hx_: *const Tensor, cx_: *const Tensor, reverse: bool, batch_sizes: []const i64, mode_: i64, hidden_size: i64, num_layers: i64, has_biases: bool, bidirectional: bool, batch_first: bool, train: bool
     ) [4]Tensor {
         var c_tensors = [_]C_tensor{null} ** 4;
         __c.atg_mkldnn_rnn_layer_out(@ptrCast(&c_tensors), out0.c_tensor,
@@ -19955,7 +19955,7 @@ pub const Tensor = struct {
                 hx_.c_tensor,
                 cx_.c_tensor,
                 if (reverse)  1  else  0,
-                batch_sizes.ptr, @intCast(batch_sizes.len),
+                @constCast(batch_sizes.ptr), @intCast(batch_sizes.len),
                 mode_,
                 hidden_size,
                 num_layers,
@@ -20013,12 +20013,12 @@ pub const Tensor = struct {
     }
 
     pub fn moveaxis(
-        self: *const Tensor, source: []i64, destination: []i64
+        self: *const Tensor, source: []const i64, destination: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_moveaxis(@ptrCast(&c_tensors), self.c_tensor,
-                source.ptr, @intCast(source.len),
-                destination.ptr, @intCast(destination.len));
+                @constCast(source.ptr), @intCast(source.len),
+                @constCast(destination.ptr), @intCast(destination.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20035,12 +20035,12 @@ pub const Tensor = struct {
     }
 
     pub fn movedim(
-        self: *const Tensor, source: []i64, destination: []i64
+        self: *const Tensor, source: []const i64, destination: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_movedim(@ptrCast(&c_tensors), self.c_tensor,
-                source.ptr, @intCast(source.len),
-                destination.ptr, @intCast(destination.len));
+                @constCast(source.ptr), @intCast(source.len),
+                @constCast(destination.ptr), @intCast(destination.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20062,7 +20062,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mse_loss(@ptrCast(&c_tensors), self.c_tensor,
                 target.c_tensor,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20074,7 +20074,7 @@ pub const Tensor = struct {
         __c.atg_mse_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
                 target.c_tensor,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20087,7 +20087,7 @@ pub const Tensor = struct {
                 grad_output.c_tensor,
                 self.c_tensor,
                 target.c_tensor,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20099,7 +20099,7 @@ pub const Tensor = struct {
         __c.atg_mse_loss_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 target.c_tensor,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20204,7 +20204,7 @@ pub const Tensor = struct {
                 p.into().c_scalar,
                 margin.into().c_scalar,
                 if (weight != null) weight.?.c_tensor else null,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20220,7 +20220,7 @@ pub const Tensor = struct {
                 p.into().c_scalar,
                 margin.into().c_scalar,
                 if (weight != null) weight.?.c_tensor else null,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20231,7 +20231,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multilabel_margin_loss(@ptrCast(&c_tensors), self.c_tensor,
                 target.c_tensor,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20243,7 +20243,7 @@ pub const Tensor = struct {
         __c.atg_multilabel_margin_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
                 target.c_tensor,
-                reduction.to_int(),
+                reduction.toInt(),
                 is_target.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -20257,7 +20257,7 @@ pub const Tensor = struct {
                 grad_output.c_tensor,
                 self.c_tensor,
                 target.c_tensor,
-                reduction.to_int(),
+                reduction.toInt(),
                 is_target.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -20270,7 +20270,7 @@ pub const Tensor = struct {
         __c.atg_multilabel_margin_loss_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 target.c_tensor,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20406,9 +20406,9 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nan_to_num(@ptrCast(&c_tensors), self.c_tensor,
-                nan orelse std.math.nan, (nan == null),
-                posinf orelse std.math.nan, (posinf == null),
-                neginf orelse std.math.nan, (neginf == null));
+                nan orelse std.math.nan(f64), @intFromBool(nan == null),
+                posinf orelse std.math.nan(f64), @intFromBool(posinf == null),
+                neginf orelse std.math.nan(f64), @intFromBool(neginf == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20418,9 +20418,9 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nan_to_num_(@ptrCast(&c_tensors), self.c_tensor,
-                nan orelse std.math.nan, (nan == null),
-                posinf orelse std.math.nan, (posinf == null),
-                neginf orelse std.math.nan, (neginf == null));
+                nan orelse std.math.nan(f64), @intFromBool(nan == null),
+                posinf orelse std.math.nan(f64), @intFromBool(posinf == null),
+                neginf orelse std.math.nan(f64), @intFromBool(neginf == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20431,9 +20431,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nan_to_num_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                nan orelse std.math.nan, (nan == null),
-                posinf orelse std.math.nan, (posinf == null),
-                neginf orelse std.math.nan, (neginf == null));
+                nan orelse std.math.nan(f64), @intFromBool(nan == null),
+                posinf orelse std.math.nan(f64), @intFromBool(posinf == null),
+                neginf orelse std.math.nan(f64), @intFromBool(neginf == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20443,7 +20443,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nanmean(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
         torch.readAndCleanError();
@@ -20456,7 +20456,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nanmean_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
         torch.readAndCleanError();
@@ -20512,9 +20512,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nanquantile(@ptrCast(&c_tensors), self.c_tensor,
                 q.c_tensor,
-                dim_ orelse 0, (dim_ == null),
+                dim_ orelse 0, @intFromBool(dim_ == null),
                 if (keepdim)  1  else  0,
-                interpolation.ptr, interpolation.len);
+                @constCast(interpolation.ptr), @intCast(interpolation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20526,9 +20526,9 @@ pub const Tensor = struct {
         __c.atg_nanquantile_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 q.c_tensor,
-                dim_ orelse 0, (dim_ == null),
+                dim_ orelse 0, @intFromBool(dim_ == null),
                 if (keepdim)  1  else  0,
-                interpolation.ptr, interpolation.len);
+                @constCast(interpolation.ptr), @intCast(interpolation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20539,9 +20539,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nanquantile_scalar(@ptrCast(&c_tensors), self.c_tensor,
                 q,
-                dim_ orelse 0, (dim_ == null),
+                dim_ orelse 0, @intFromBool(dim_ == null),
                 if (keepdim)  1  else  0,
-                interpolation.ptr, interpolation.len);
+                @constCast(interpolation.ptr), @intCast(interpolation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20553,9 +20553,9 @@ pub const Tensor = struct {
         __c.atg_nanquantile_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 q,
-                dim_ orelse 0, (dim_ == null),
+                dim_ orelse 0, @intFromBool(dim_ == null),
                 if (keepdim)  1  else  0,
-                interpolation.ptr, interpolation.len);
+                @constCast(interpolation.ptr), @intCast(interpolation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20565,7 +20565,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nansum(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
         torch.readAndCleanError();
@@ -20578,7 +20578,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nansum_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
         torch.readAndCleanError();
@@ -20762,11 +20762,11 @@ pub const Tensor = struct {
     }
 
     pub fn nativeLayerNorm(
-        self: *const Tensor, normalized_shape: []i64, weight: ?*const Tensor, bias: ?*const Tensor, eps: f64
+        self: *const Tensor, normalized_shape: []const i64, weight: ?*const Tensor, bias: ?*const Tensor, eps: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_native_layer_norm(@ptrCast(&c_tensors), self.c_tensor,
-                normalized_shape.ptr, @intCast(normalized_shape.len),
+                @constCast(normalized_shape.ptr), @intCast(normalized_shape.len),
                 if (weight != null) weight.?.c_tensor else null,
                 if (bias != null) bias.?.c_tensor else null,
                 eps);
@@ -20775,14 +20775,14 @@ pub const Tensor = struct {
     }
 
     pub fn nativeLayerNormOut(
-        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, normalized_shape: []i64, weight: ?*const Tensor, bias: ?*const Tensor, eps: f64
+        self: *const Tensor, out0: *const Tensor, out1: *const Tensor, out2: *const Tensor, normalized_shape: []const i64, weight: ?*const Tensor, bias: ?*const Tensor, eps: f64
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_native_layer_norm_out(@ptrCast(&c_tensors), out0.c_tensor,
                 out1.c_tensor,
                 out2.c_tensor,
                 self.c_tensor,
-                normalized_shape.ptr, @intCast(normalized_shape.len),
+                @constCast(normalized_shape.ptr), @intCast(normalized_shape.len),
                 if (weight != null) weight.?.c_tensor else null,
                 if (bias != null) bias.?.c_tensor else null,
                 eps);
@@ -20810,12 +20810,12 @@ pub const Tensor = struct {
     }
 
     pub fn nativeNormScalaroptDimDtype(
-        self: *const Tensor, p: Scalar, dim_: []i64, keepdim: bool, dtype: ?Kind
+        self: *const Tensor, p: Scalar, dim_: []const i64, keepdim: bool, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_native_norm_scalaropt_dim_dtype(@ptrCast(&c_tensors), self.c_tensor,
                 p.into().c_scalar,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
         torch.readAndCleanError();
@@ -20823,13 +20823,13 @@ pub const Tensor = struct {
     }
 
     pub fn nativeNormScalaroptDimDtypeOut(
-        self: *const Tensor, out: *const Tensor, p: Scalar, dim_: []i64, keepdim: bool, dtype: ?Kind
+        self: *const Tensor, out: *const Tensor, p: Scalar, dim_: []const i64, keepdim: bool, dtype: ?Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_native_norm_scalaropt_dim_dtype_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 p.into().c_scalar,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
         torch.readAndCleanError();
@@ -20960,63 +20960,63 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nested_to_padded_tensor(@ptrCast(&c_tensors), self.c_tensor,
                 padding,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn newEmpty(
-        self: *const Tensor, size_: []i64, options_: TensorOptions
+        self: *const Tensor, size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_empty(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn newEmptyOut(
-        self: *const Tensor, out: *const Tensor, size_: []i64
+        self: *const Tensor, out: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_empty_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn newEmptyStrided(
-        self: *const Tensor, size_: []i64, stride_: []i64, options_: TensorOptions
+        self: *const Tensor, size_: []const i64, stride_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_empty_strided(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len),
-                stride_.ptr, @intCast(stride_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn newEmptyStridedOut(
-        self: *const Tensor, out: *const Tensor, size_: []i64, stride_: []i64
+        self: *const Tensor, out: *const Tensor, size_: []const i64, stride_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_empty_strided_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                size_.ptr, @intCast(size_.len),
-                stride_.ptr, @intCast(stride_.len));
+                @constCast(size_.ptr), @intCast(size_.len),
+                @constCast(stride_.ptr), @intCast(stride_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn newFull(
-        self: *const Tensor, size_: []i64, fill_value: Scalar, options_: TensorOptions
+        self: *const Tensor, size_: []const i64, fill_value: Scalar, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_full(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 fill_value.into().c_scalar,
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
@@ -21024,57 +21024,57 @@ pub const Tensor = struct {
     }
 
     pub fn newFullOut(
-        self: *const Tensor, out: *const Tensor, size_: []i64, fill_value: Scalar
+        self: *const Tensor, out: *const Tensor, size_: []const i64, fill_value: Scalar
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_full_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 fill_value.into().c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn newOnes(
-        self: *const Tensor, size_: []i64, options_: TensorOptions
+        self: *const Tensor, size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_ones(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn newOnesOut(
-        self: *const Tensor, out: *const Tensor, size_: []i64
+        self: *const Tensor, out: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_ones_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn newZeros(
-        self: *const Tensor, size_: []i64, options_: TensorOptions
+        self: *const Tensor, size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_zeros(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn newZerosOut(
-        self: *const Tensor, out: *const Tensor, size_: []i64
+        self: *const Tensor, out: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_zeros_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -21117,7 +21117,7 @@ pub const Tensor = struct {
         __c.atg_nll_loss(@ptrCast(&c_tensors), self.c_tensor,
                 target.c_tensor,
                 if (weight != null) weight.?.c_tensor else null,
-                reduction.to_int(),
+                reduction.toInt(),
                 ignore_index);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -21130,7 +21130,7 @@ pub const Tensor = struct {
         __c.atg_nll_loss2d(@ptrCast(&c_tensors), self.c_tensor,
                 target.c_tensor,
                 if (weight != null) weight.?.c_tensor else null,
-                reduction.to_int(),
+                reduction.toInt(),
                 ignore_index);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -21144,7 +21144,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 target.c_tensor,
                 if (weight != null) weight.?.c_tensor else null,
-                reduction.to_int(),
+                reduction.toInt(),
                 ignore_index,
                 total_weight.c_tensor);
         torch.readAndCleanError();
@@ -21160,7 +21160,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 target.c_tensor,
                 if (weight != null) weight.?.c_tensor else null,
-                reduction.to_int(),
+                reduction.toInt(),
                 ignore_index,
                 total_weight.c_tensor);
         torch.readAndCleanError();
@@ -21175,7 +21175,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 target.c_tensor,
                 if (weight != null) weight.?.c_tensor else null,
-                reduction.to_int(),
+                reduction.toInt(),
                 ignore_index);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -21189,7 +21189,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 target.c_tensor,
                 if (weight != null) weight.?.c_tensor else null,
-                reduction.to_int(),
+                reduction.toInt(),
                 ignore_index,
                 total_weight.c_tensor);
         torch.readAndCleanError();
@@ -21205,7 +21205,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 target.c_tensor,
                 if (weight != null) weight.?.c_tensor else null,
-                reduction.to_int(),
+                reduction.toInt(),
                 ignore_index,
                 total_weight.c_tensor);
         torch.readAndCleanError();
@@ -21219,7 +21219,7 @@ pub const Tensor = struct {
         __c.atg_nll_loss_nd(@ptrCast(&c_tensors), self.c_tensor,
                 target.c_tensor,
                 if (weight != null) weight.?.c_tensor else null,
-                reduction.to_int(),
+                reduction.toInt(),
                 ignore_index);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -21233,7 +21233,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 target.c_tensor,
                 if (weight != null) weight.?.c_tensor else null,
-                reduction.to_int(),
+                reduction.toInt(),
                 ignore_index);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -21306,13 +21306,13 @@ pub const Tensor = struct {
     }
 
     pub fn normDtypeOut(
-        self: *const Tensor, out: *const Tensor, p: Scalar, dim_: []i64, keepdim: bool, dtype: Kind
+        self: *const Tensor, out: *const Tensor, p: Scalar, dim_: []const i64, keepdim: bool, dtype: Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_norm_dtype_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 p.into().c_scalar,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype.cInt());
         torch.readAndCleanError();
@@ -21331,13 +21331,13 @@ pub const Tensor = struct {
     }
 
     pub fn normOut(
-        self: *const Tensor, out: *const Tensor, p: Scalar, dim_: []i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, p: Scalar, dim_: []const i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_norm_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 p.into().c_scalar,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -21354,24 +21354,24 @@ pub const Tensor = struct {
     }
 
     pub fn normScalaroptDim(
-        self: *const Tensor, p: Scalar, dim_: []i64, keepdim: bool
+        self: *const Tensor, p: Scalar, dim_: []const i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_norm_scalaropt_dim(@ptrCast(&c_tensors), self.c_tensor,
                 p.into().c_scalar,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn normScalaroptDimDtype(
-        self: *const Tensor, p: Scalar, dim_: []i64, keepdim: bool, dtype: Kind
+        self: *const Tensor, p: Scalar, dim_: []const i64, keepdim: bool, dtype: Kind
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_norm_scalaropt_dim_dtype(@ptrCast(&c_tensors), self.c_tensor,
                 p.into().c_scalar,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype.cInt());
         torch.readAndCleanError();
@@ -21496,23 +21496,23 @@ pub const Tensor = struct {
     }
 
     pub fn nuclearNormDim(
-        self: *const Tensor, dim_: []i64, keepdim: bool
+        self: *const Tensor, dim_: []const i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nuclear_norm_dim(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn nuclearNormDimOut(
-        self: *const Tensor, out: *const Tensor, dim_: []i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: []const i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nuclear_norm_dim_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -21549,10 +21549,10 @@ pub const Tensor = struct {
     }
 
     pub fn ones(
-        size_: []i64, options_: TensorOptions
+        size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_ones(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
+        __c.atg_ones(@ptrCast(&c_tensors), @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -21578,11 +21578,11 @@ pub const Tensor = struct {
     }
 
     pub fn onesOut(
-        out: *const Tensor, size_: []i64
+        out: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ones_out(@ptrCast(&c_tensors), out.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -21665,13 +21665,13 @@ pub const Tensor = struct {
     }
 
     pub fn pad(
-        self: *const Tensor, padding: []i64, mode_: []const u8, value: ?f64
+        self: *const Tensor, padding: []const i64, mode_: []const u8, value: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_pad(@ptrCast(&c_tensors), self.c_tensor,
-                padding.ptr, @intCast(padding.len),
-                mode_.ptr, mode_.len,
-                value orelse std.math.nan, (value == null));
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(mode_.ptr), @intCast(mode_.len),
+                value orelse std.math.nan(f64), @intFromBool(value == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -21711,32 +21711,32 @@ pub const Tensor = struct {
     }
 
     pub fn permute(
-        self: *const Tensor, dims: []i64
+        self: *const Tensor, dims: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_permute(@ptrCast(&c_tensors), self.c_tensor,
-                dims.ptr, @intCast(dims.len));
+                @constCast(dims.ptr), @intCast(dims.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn permuteCopy(
-        self: *const Tensor, dims: []i64
+        self: *const Tensor, dims: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_permute_copy(@ptrCast(&c_tensors), self.c_tensor,
-                dims.ptr, @intCast(dims.len));
+                @constCast(dims.ptr), @intCast(dims.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn permuteCopyOut(
-        self: *const Tensor, out: *const Tensor, dims: []i64
+        self: *const Tensor, out: *const Tensor, dims: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_permute_copy_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dims.ptr, @intCast(dims.len));
+                @constCast(dims.ptr), @intCast(dims.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -21821,7 +21821,7 @@ pub const Tensor = struct {
                 if (log_input)  1  else  0,
                 if (full_)  1  else  0,
                 eps,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22163,9 +22163,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantile(@ptrCast(&c_tensors), self.c_tensor,
                 q.c_tensor,
-                dim_ orelse 0, (dim_ == null),
+                dim_ orelse 0, @intFromBool(dim_ == null),
                 if (keepdim)  1  else  0,
-                interpolation.ptr, interpolation.len);
+                @constCast(interpolation.ptr), @intCast(interpolation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22177,9 +22177,9 @@ pub const Tensor = struct {
         __c.atg_quantile_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 q.c_tensor,
-                dim_ orelse 0, (dim_ == null),
+                dim_ orelse 0, @intFromBool(dim_ == null),
                 if (keepdim)  1  else  0,
-                interpolation.ptr, interpolation.len);
+                @constCast(interpolation.ptr), @intCast(interpolation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22190,9 +22190,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantile_scalar(@ptrCast(&c_tensors), self.c_tensor,
                 q,
-                dim_ orelse 0, (dim_ == null),
+                dim_ orelse 0, @intFromBool(dim_ == null),
                 if (keepdim)  1  else  0,
-                interpolation.ptr, interpolation.len);
+                @constCast(interpolation.ptr), @intCast(interpolation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22204,9 +22204,9 @@ pub const Tensor = struct {
         __c.atg_quantile_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 q,
-                dim_ orelse 0, (dim_ == null),
+                dim_ orelse 0, @intFromBool(dim_ == null),
                 if (keepdim)  1  else  0,
-                interpolation.ptr, interpolation.len);
+                @constCast(interpolation.ptr), @intCast(interpolation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22419,87 +22419,87 @@ pub const Tensor = struct {
     }
 
     pub fn quantizedMaxPool1d(
-        self: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantized_max_pool1d(@ptrCast(&c_tensors), self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn quantizedMaxPool1dOut(
-        self: *const Tensor, out: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantized_max_pool1d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn quantizedMaxPool2d(
-        self: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantized_max_pool2d(@ptrCast(&c_tensors), self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn quantizedMaxPool2dOut(
-        self: *const Tensor, out: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantized_max_pool2d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn quantizedMaxPool3d(
-        self: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantized_max_pool3d(@ptrCast(&c_tensors), self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn quantizedMaxPool3dOut(
-        self: *const Tensor, out: *const Tensor, kernel_size: []i64, stride_: []i64, padding: []i64, dilation: []i64, ceil_mode: bool
+        self: *const Tensor, out: *const Tensor, kernel_size: []const i64, stride_: []const i64, padding: []const i64, dilation: []const i64, ceil_mode: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_quantized_max_pool3d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len),
                 if (ceil_mode)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -22578,10 +22578,10 @@ pub const Tensor = struct {
     }
 
     pub fn rand(
-        size_: []i64, options_: TensorOptions
+        size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_rand(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
+        __c.atg_rand(@ptrCast(&c_tensors), @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -22607,21 +22607,21 @@ pub const Tensor = struct {
     }
 
     pub fn randOut(
-        out: *const Tensor, size_: []i64
+        out: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rand_out(@ptrCast(&c_tensors), out.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn randint(
-        high: i64, size_: []i64, options_: TensorOptions
+        high: i64, size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_randint(@ptrCast(&c_tensors), high,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -22672,45 +22672,45 @@ pub const Tensor = struct {
     }
 
     pub fn randintLow(
-        low: i64, high: i64, size_: []i64, options_: TensorOptions
+        low: i64, high: i64, size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_randint_low(@ptrCast(&c_tensors), low,
                 high,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn randintLowOut(
-        out: *const Tensor, low: i64, high: i64, size_: []i64
+        out: *const Tensor, low: i64, high: i64, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_randint_low_out(@ptrCast(&c_tensors), out.c_tensor,
                 low,
                 high,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn randintOut(
-        out: *const Tensor, high: i64, size_: []i64
+        out: *const Tensor, high: i64, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_randint_out(@ptrCast(&c_tensors), out.c_tensor,
                 high,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn randn(
-        size_: []i64, options_: TensorOptions
+        size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_randn(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
+        __c.atg_randn(@ptrCast(&c_tensors), @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -22736,11 +22736,11 @@ pub const Tensor = struct {
     }
 
     pub fn randnOut(
-        out: *const Tensor, size_: []i64
+        out: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_randn_out(@ptrCast(&c_tensors), out.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22769,7 +22769,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_random_from(@ptrCast(&c_tensors), self.c_tensor,
                 from,
-                to_ orelse 0, (to_ == null));
+                to_ orelse 0, @intFromBool(to_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22780,7 +22780,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_random_from_(@ptrCast(&c_tensors), self.c_tensor,
                 from,
-                to_ orelse 0, (to_ == null));
+                to_ orelse 0, @intFromBool(to_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22792,7 +22792,7 @@ pub const Tensor = struct {
         __c.atg_random_from_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 from,
-                to_ orelse 0, (to_ == null));
+                to_ orelse 0, @intFromBool(to_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22949,133 +22949,133 @@ pub const Tensor = struct {
     }
 
     pub fn reflectionPad1d(
-        self: *const Tensor, padding: []i64
+        self: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad1d(@ptrCast(&c_tensors), self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn reflectionPad1dBackward(
-        self: *const Tensor, grad_output: *const Tensor, padding: []i64
+        self: *const Tensor, grad_output: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad1d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn reflectionPad1dBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, padding: []i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad1d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn reflectionPad1dOut(
-        self: *const Tensor, out: *const Tensor, padding: []i64
+        self: *const Tensor, out: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad1d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn reflectionPad2d(
-        self: *const Tensor, padding: []i64
+        self: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad2d(@ptrCast(&c_tensors), self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn reflectionPad2dBackward(
-        self: *const Tensor, grad_output: *const Tensor, padding: []i64
+        self: *const Tensor, grad_output: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn reflectionPad2dBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, padding: []i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn reflectionPad2dOut(
-        self: *const Tensor, out: *const Tensor, padding: []i64
+        self: *const Tensor, out: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad2d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn reflectionPad3d(
-        self: *const Tensor, padding: []i64
+        self: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad3d(@ptrCast(&c_tensors), self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn reflectionPad3dBackward(
-        self: *const Tensor, grad_output: *const Tensor, padding: []i64
+        self: *const Tensor, grad_output: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad3d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn reflectionPad3dBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, padding: []i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad3d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn reflectionPad3dOut(
-        self: *const Tensor, out: *const Tensor, padding: []i64
+        self: *const Tensor, out: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reflection_pad3d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -23247,11 +23247,11 @@ pub const Tensor = struct {
     }
 
     pub fn repeat(
-        self: *const Tensor, repeats: []i64
+        self: *const Tensor, repeats: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_repeat(@ptrCast(&c_tensors), self.c_tensor,
-                repeats.ptr, @intCast(repeats.len));
+                @constCast(repeats.ptr), @intCast(repeats.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -23261,7 +23261,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_repeat_interleave(@ptrCast(&c_tensors), repeats.c_tensor,
-                output_size orelse 0, (output_size == null));
+                output_size orelse 0, @intFromBool(output_size == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -23272,8 +23272,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_repeat_interleave_self_int(@ptrCast(&c_tensors), self.c_tensor,
                 repeats,
-                dim_ orelse 0, (dim_ == null),
-                output_size orelse 0, (output_size == null));
+                dim_ orelse 0, @intFromBool(dim_ == null),
+                output_size orelse 0, @intFromBool(output_size == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -23284,8 +23284,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_repeat_interleave_self_tensor(@ptrCast(&c_tensors), self.c_tensor,
                 repeats.c_tensor,
-                dim_ orelse 0, (dim_ == null),
-                output_size orelse 0, (output_size == null));
+                dim_ orelse 0, @intFromBool(dim_ == null),
+                output_size orelse 0, @intFromBool(output_size == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -23296,150 +23296,150 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_repeat_interleave_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
                 repeats.c_tensor,
-                output_size orelse 0, (output_size == null));
+                output_size orelse 0, @intFromBool(output_size == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn repeatOut(
-        self: *const Tensor, out: *const Tensor, repeats: []i64
+        self: *const Tensor, out: *const Tensor, repeats: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_repeat_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                repeats.ptr, @intCast(repeats.len));
+                @constCast(repeats.ptr), @intCast(repeats.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn replicationPad1d(
-        self: *const Tensor, padding: []i64
+        self: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad1d(@ptrCast(&c_tensors), self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn replicationPad1dBackward(
-        self: *const Tensor, grad_output: *const Tensor, padding: []i64
+        self: *const Tensor, grad_output: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad1d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn replicationPad1dBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, padding: []i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad1d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn replicationPad1dOut(
-        self: *const Tensor, out: *const Tensor, padding: []i64
+        self: *const Tensor, out: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad1d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn replicationPad2d(
-        self: *const Tensor, padding: []i64
+        self: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad2d(@ptrCast(&c_tensors), self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn replicationPad2dBackward(
-        self: *const Tensor, grad_output: *const Tensor, padding: []i64
+        self: *const Tensor, grad_output: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn replicationPad2dBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, padding: []i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn replicationPad2dOut(
-        self: *const Tensor, out: *const Tensor, padding: []i64
+        self: *const Tensor, out: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad2d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn replicationPad3d(
-        self: *const Tensor, padding: []i64
+        self: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad3d(@ptrCast(&c_tensors), self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn replicationPad3dBackward(
-        self: *const Tensor, grad_output: *const Tensor, padding: []i64
+        self: *const Tensor, grad_output: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad3d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn replicationPad3dBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, padding: []i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad3d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn replicationPad3dOut(
-        self: *const Tensor, out: *const Tensor, padding: []i64
+        self: *const Tensor, out: *const Tensor, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_replication_pad3d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                padding.ptr, @intCast(padding.len));
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -23455,11 +23455,11 @@ pub const Tensor = struct {
     }
 
     pub fn reshape(
-        self: *const Tensor, shape: []i64
+        self: *const Tensor, shape: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_reshape(@ptrCast(&c_tensors), self.c_tensor,
-                shape.ptr, @intCast(shape.len));
+                @constCast(shape.ptr), @intCast(shape.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -23475,21 +23475,21 @@ pub const Tensor = struct {
     }
 
     pub fn resize(
-        self: *const Tensor, size_: []i64
+        self: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_resize(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn resize_(
-        self: *Tensor, size_: []i64
+        self: *Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_resize_(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -23557,12 +23557,12 @@ pub const Tensor = struct {
     }
 
     pub fn resizeOut(
-        self: *const Tensor, out: *const Tensor, size_: []i64
+        self: *const Tensor, out: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_resize_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -23690,47 +23690,47 @@ pub const Tensor = struct {
     }
 
     pub fn roll(
-        self: *const Tensor, shifts: []i64, dims: []i64
+        self: *const Tensor, shifts: []const i64, dims: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_roll(@ptrCast(&c_tensors), self.c_tensor,
-                shifts.ptr, @intCast(shifts.len),
-                dims.ptr, @intCast(dims.len));
+                @constCast(shifts.ptr), @intCast(shifts.len),
+                @constCast(dims.ptr), @intCast(dims.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn rollOut(
-        self: *const Tensor, out: *const Tensor, shifts: []i64, dims: []i64
+        self: *const Tensor, out: *const Tensor, shifts: []const i64, dims: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_roll_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                shifts.ptr, @intCast(shifts.len),
-                dims.ptr, @intCast(dims.len));
+                @constCast(shifts.ptr), @intCast(shifts.len),
+                @constCast(dims.ptr), @intCast(dims.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn rot90(
-        self: *const Tensor, k: i64, dims: []i64
+        self: *const Tensor, k: i64, dims: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rot90(@ptrCast(&c_tensors), self.c_tensor,
                 k,
-                dims.ptr, @intCast(dims.len));
+                @constCast(dims.ptr), @intCast(dims.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn rot90Out(
-        self: *const Tensor, out: *const Tensor, k: i64, dims: []i64
+        self: *const Tensor, out: *const Tensor, k: i64, dims: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rot90_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 k,
-                dims.ptr, @intCast(dims.len));
+                @constCast(dims.ptr), @intCast(dims.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -24026,7 +24026,7 @@ pub const Tensor = struct {
                 if (attn_mask != null) attn_mask.?.c_tensor else null,
                 dropout_p,
                 if (is_causal)  1  else  0,
-                scale orelse std.math.nan, (scale == null));
+                scale orelse std.math.nan(f64), @intFromBool(scale == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -24100,7 +24100,7 @@ pub const Tensor = struct {
                 dim_,
                 index_.c_tensor,
                 src.c_tensor,
-                reduce.ptr, reduce.len);
+                @constCast(reduce.ptr), @intCast(reduce.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -24113,7 +24113,7 @@ pub const Tensor = struct {
                 dim_,
                 index_.c_tensor,
                 src.c_tensor,
-                reduce.ptr, reduce.len);
+                @constCast(reduce.ptr), @intCast(reduce.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -24127,7 +24127,7 @@ pub const Tensor = struct {
                 dim_,
                 index_.c_tensor,
                 src.c_tensor,
-                reduce.ptr, reduce.len);
+                @constCast(reduce.ptr), @intCast(reduce.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -24190,7 +24190,7 @@ pub const Tensor = struct {
                 dim_,
                 index_.c_tensor,
                 value.into().c_scalar,
-                reduce.ptr, reduce.len);
+                @constCast(reduce.ptr), @intCast(reduce.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -24203,7 +24203,7 @@ pub const Tensor = struct {
                 dim_,
                 index_.c_tensor,
                 value.into().c_scalar,
-                reduce.ptr, reduce.len);
+                @constCast(reduce.ptr), @intCast(reduce.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -24217,7 +24217,7 @@ pub const Tensor = struct {
                 dim_,
                 index_.c_tensor,
                 value.into().c_scalar,
-                reduce.ptr, reduce.len);
+                @constCast(reduce.ptr), @intCast(reduce.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -24230,7 +24230,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 if (out_int32)  1  else  0,
                 if (right)  1  else  0,
-                side.ptr, side.len,
+                @constCast(side.ptr), @intCast(side.len),
                 if (sorter != null) sorter.?.c_tensor else null);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -24244,7 +24244,7 @@ pub const Tensor = struct {
                 self_scalar.into().c_scalar,
                 if (out_int32)  1  else  0,
                 if (right)  1  else  0,
-                side.ptr, side.len,
+                @constCast(side.ptr), @intCast(side.len),
                 if (sorter != null) sorter.?.c_tensor else null);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -24259,7 +24259,7 @@ pub const Tensor = struct {
                 self_scalar.into().c_scalar,
                 if (out_int32)  1  else  0,
                 if (right)  1  else  0,
-                side.ptr, side.len,
+                @constCast(side.ptr), @intCast(side.len),
                 if (sorter != null) sorter.?.c_tensor else null);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -24274,7 +24274,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 if (out_int32)  1  else  0,
                 if (right)  1  else  0,
-                side.ptr, side.len,
+                @constCast(side.ptr), @intCast(side.len),
                 if (sorter != null) sorter.?.c_tensor else null);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -24285,7 +24285,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_segment_reduce(@ptrCast(&c_tensors), data_.c_tensor,
-                reduce.ptr, reduce.len,
+                @constCast(reduce.ptr), @intCast(reduce.len),
                 if (lengths != null) lengths.?.c_tensor else null,
                 if (indices_ != null) indices_.?.c_tensor else null,
                 if (offsets != null) offsets.?.c_tensor else null,
@@ -24302,7 +24302,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_segment_reduce_out(@ptrCast(&c_tensors), out.c_tensor,
                 data_.c_tensor,
-                reduce.ptr, reduce.len,
+                @constCast(reduce.ptr), @intCast(reduce.len),
                 if (lengths != null) lengths.?.c_tensor else null,
                 if (indices_ != null) indices_.?.c_tensor else null,
                 if (offsets != null) offsets.?.c_tensor else null,
@@ -24325,11 +24325,11 @@ pub const Tensor = struct {
     }
 
     pub fn selectBackward(
-        grad_output: *const Tensor, input_sizes: []i64, dim_: i64, index_: i64
+        grad_output: *const Tensor, input_sizes: []const i64, dim_: i64, index_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_select_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
-                input_sizes.ptr, @intCast(input_sizes.len),
+                @constCast(input_sizes.ptr), @intCast(input_sizes.len),
                 dim_,
                 index_);
         torch.readAndCleanError();
@@ -24337,12 +24337,12 @@ pub const Tensor = struct {
     }
 
     pub fn selectBackwardOut(
-        out: *const Tensor, grad_output: *const Tensor, input_sizes: []i64, dim_: i64, index_: i64
+        out: *const Tensor, grad_output: *const Tensor, input_sizes: []const i64, dim_: i64, index_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_select_backward_out(@ptrCast(&c_tensors), out.c_tensor,
                 grad_output.c_tensor,
-                input_sizes.ptr, @intCast(input_sizes.len),
+                @constCast(input_sizes.ptr), @intCast(input_sizes.len),
                 dim_,
                 index_);
         torch.readAndCleanError();
@@ -24494,14 +24494,14 @@ pub const Tensor = struct {
     }
 
     pub fn setSourceTensorStorageOffset_(
-        self: *Tensor, source: *const Tensor, storage_offset: i64, size_: []i64, stride_: []i64
+        self: *Tensor, source: *const Tensor, storage_offset: i64, size_: []const i64, stride_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_set_source_tensor_storage_offset_(@ptrCast(&c_tensors), self.c_tensor,
                 source.c_tensor,
                 storage_offset,
-                size_.ptr, @intCast(size_.len),
-                stride_.ptr, @intCast(stride_.len));
+                @constCast(size_.ptr), @intCast(size_.len),
+                @constCast(stride_.ptr), @intCast(stride_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -24769,19 +24769,19 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slice(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
-                start orelse 0, (start == null),
-                end orelse 0, (end == null),
+                start orelse 0, @intFromBool(start == null),
+                end orelse 0, @intFromBool(end == null),
                 step);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn sliceBackward(
-        grad_output: *const Tensor, input_sizes: []i64, dim_: i64, start: i64, end: i64, step: i64
+        grad_output: *const Tensor, input_sizes: []const i64, dim_: i64, start: i64, end: i64, step: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slice_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
-                input_sizes.ptr, @intCast(input_sizes.len),
+                @constCast(input_sizes.ptr), @intCast(input_sizes.len),
                 dim_,
                 start,
                 end,
@@ -24791,12 +24791,12 @@ pub const Tensor = struct {
     }
 
     pub fn sliceBackwardOut(
-        out: *const Tensor, grad_output: *const Tensor, input_sizes: []i64, dim_: i64, start: i64, end: i64, step: i64
+        out: *const Tensor, grad_output: *const Tensor, input_sizes: []const i64, dim_: i64, start: i64, end: i64, step: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slice_backward_out(@ptrCast(&c_tensors), out.c_tensor,
                 grad_output.c_tensor,
-                input_sizes.ptr, @intCast(input_sizes.len),
+                @constCast(input_sizes.ptr), @intCast(input_sizes.len),
                 dim_,
                 start,
                 end,
@@ -24811,8 +24811,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slice_copy(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
-                start orelse 0, (start == null),
-                end orelse 0, (end == null),
+                start orelse 0, @intFromBool(start == null),
+                end orelse 0, @intFromBool(end == null),
                 step);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -24825,8 +24825,8 @@ pub const Tensor = struct {
         __c.atg_slice_copy_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 dim_,
-                start orelse 0, (start == null),
-                end orelse 0, (end == null),
+                start orelse 0, @intFromBool(start == null),
+                end orelse 0, @intFromBool(end == null),
                 step);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -24839,8 +24839,8 @@ pub const Tensor = struct {
         __c.atg_slice_inverse(@ptrCast(&c_tensors), self.c_tensor,
                 src.c_tensor,
                 dim_,
-                start orelse 0, (start == null),
-                end orelse 0, (end == null),
+                start orelse 0, @intFromBool(start == null),
+                end orelse 0, @intFromBool(end == null),
                 step);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -24853,8 +24853,8 @@ pub const Tensor = struct {
         __c.atg_slice_scatter(@ptrCast(&c_tensors), self.c_tensor,
                 src.c_tensor,
                 dim_,
-                start orelse 0, (start == null),
-                end orelse 0, (end == null),
+                start orelse 0, @intFromBool(start == null),
+                end orelse 0, @intFromBool(end == null),
                 step);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -24868,8 +24868,8 @@ pub const Tensor = struct {
                 self.c_tensor,
                 src.c_tensor,
                 dim_,
-                start orelse 0, (start == null),
-                end orelse 0, (end == null),
+                start orelse 0, @intFromBool(start == null),
+                end orelse 0, @intFromBool(end == null),
                 step);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -24896,158 +24896,158 @@ pub const Tensor = struct {
     }
 
     pub fn slowConv3d(
-        self: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64
+        self: *const Tensor, weight: *const Tensor, kernel_size: []const i64, bias: ?*const Tensor, stride_: []const i64, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv3d(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len));
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn slowConv3dOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []const i64, bias: ?*const Tensor, stride_: []const i64, padding: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv3d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len));
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn slowConvDilated2d(
-        self: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64
+        self: *const Tensor, weight: *const Tensor, kernel_size: []const i64, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv_dilated2d(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len));
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn slowConvDilated2dOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []const i64, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv_dilated2d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len));
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn slowConvDilated3d(
-        self: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64
+        self: *const Tensor, weight: *const Tensor, kernel_size: []const i64, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv_dilated3d(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len));
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn slowConvDilated3dOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, dilation: []i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []const i64, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, dilation: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv_dilated3d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                dilation.ptr, @intCast(dilation.len));
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn slowConvTranspose2d(
-        self: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, output_padding: []i64, dilation: []i64
+        self: *const Tensor, weight: *const Tensor, kernel_size: []const i64, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, output_padding: []const i64, dilation: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv_transpose2d(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                output_padding.ptr, @intCast(output_padding.len),
-                dilation.ptr, @intCast(dilation.len));
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn slowConvTranspose2dOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, output_padding: []i64, dilation: []i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []const i64, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, output_padding: []const i64, dilation: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv_transpose2d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                output_padding.ptr, @intCast(output_padding.len),
-                dilation.ptr, @intCast(dilation.len));
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn slowConvTranspose3d(
-        self: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, output_padding: []i64, dilation: []i64
+        self: *const Tensor, weight: *const Tensor, kernel_size: []const i64, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, output_padding: []const i64, dilation: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv_transpose3d(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                output_padding.ptr, @intCast(output_padding.len),
-                dilation.ptr, @intCast(dilation.len));
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn slowConvTranspose3dOut(
-        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []i64, bias: ?*const Tensor, stride_: []i64, padding: []i64, output_padding: []i64, dilation: []i64
+        self: *const Tensor, out: *const Tensor, weight: *const Tensor, kernel_size: []const i64, bias: ?*const Tensor, stride_: []const i64, padding: []const i64, output_padding: []const i64, dilation: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_slow_conv_transpose3d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 weight.c_tensor,
-                kernel_size.ptr, @intCast(kernel_size.len),
+                @constCast(kernel_size.ptr), @intCast(kernel_size.len),
                 if (bias != null) bias.?.c_tensor else null,
-                stride_.ptr, @intCast(stride_.len),
-                padding.ptr, @intCast(padding.len),
-                output_padding.ptr, @intCast(output_padding.len),
-                dilation.ptr, @intCast(dilation.len));
+                @constCast(stride_.ptr), @intCast(stride_.len),
+                @constCast(padding.ptr), @intCast(padding.len),
+                @constCast(output_padding.ptr), @intCast(output_padding.len),
+                @constCast(dilation.ptr), @intCast(dilation.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25068,7 +25068,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_smooth_l1_loss(@ptrCast(&c_tensors), self.c_tensor,
                 target.c_tensor,
-                reduction.to_int(),
+                reduction.toInt(),
                 beta);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -25081,7 +25081,7 @@ pub const Tensor = struct {
         __c.atg_smooth_l1_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
                 target.c_tensor,
-                reduction.to_int(),
+                reduction.toInt(),
                 beta);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -25095,7 +25095,7 @@ pub const Tensor = struct {
                 grad_output.c_tensor,
                 self.c_tensor,
                 target.c_tensor,
-                reduction.to_int(),
+                reduction.toInt(),
                 beta);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -25108,7 +25108,7 @@ pub const Tensor = struct {
         __c.atg_smooth_l1_loss_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 target.c_tensor,
-                reduction.to_int(),
+                reduction.toInt(),
                 beta);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -25120,7 +25120,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_soft_margin_loss(@ptrCast(&c_tensors), self.c_tensor,
                 target.c_tensor,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25132,7 +25132,7 @@ pub const Tensor = struct {
         __c.atg_soft_margin_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
                 target.c_tensor,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25145,7 +25145,7 @@ pub const Tensor = struct {
                 grad_output.c_tensor,
                 self.c_tensor,
                 target.c_tensor,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25157,7 +25157,7 @@ pub const Tensor = struct {
         __c.atg_soft_margin_loss_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 target.c_tensor,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25334,13 +25334,13 @@ pub const Tensor = struct {
     }
 
     pub fn sparseBscTensorCcolRowValueSize(
-        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
+        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_bsc_tensor_ccol_row_value_size(@ptrCast(&c_tensors), ccol_indices_.c_tensor,
                 row_indices_.c_tensor,
                 values_.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -25359,13 +25359,13 @@ pub const Tensor = struct {
     }
 
     pub fn sparseBsrTensorCrowColValueSize(
-        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
+        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_bsr_tensor_crow_col_value_size(@ptrCast(&c_tensors), crow_indices_.c_tensor,
                 col_indices_.c_tensor,
                 values_.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -25384,23 +25384,23 @@ pub const Tensor = struct {
     }
 
     pub fn sparseCompressedTensorCompPlainValueSize(
-        compressed_indices: *const Tensor, plain_indices: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
+        compressed_indices: *const Tensor, plain_indices: *const Tensor, values_: *const Tensor, size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_compressed_tensor_comp_plain_value_size(@ptrCast(&c_tensors), compressed_indices.c_tensor,
                 plain_indices.c_tensor,
                 values_.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn sparseCooTensor(
-        size_: []i64, options_: TensorOptions
+        size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_sparse_coo_tensor(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
+        __c.atg_sparse_coo_tensor(@ptrCast(&c_tensors), @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -25419,12 +25419,12 @@ pub const Tensor = struct {
     }
 
     pub fn sparseCooTensorIndicesSize(
-        indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions, is_coalesced_: bool
+        indices_: *const Tensor, values_: *const Tensor, size_: []const i64, options_: TensorOptions, is_coalesced_: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_coo_tensor_indices_size(@ptrCast(&c_tensors), indices_.c_tensor,
                 values_.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt(),
                 if (is_coalesced_)  1  else  0);
         torch.readAndCleanError();
@@ -25432,11 +25432,11 @@ pub const Tensor = struct {
     }
 
     pub fn sparseCooTensorSizeOut(
-        out: *const Tensor, size_: []i64
+        out: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_coo_tensor_size_out(@ptrCast(&c_tensors), out.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25454,13 +25454,13 @@ pub const Tensor = struct {
     }
 
     pub fn sparseCscTensorCcolRowValueSize(
-        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
+        ccol_indices_: *const Tensor, row_indices_: *const Tensor, values_: *const Tensor, size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_csc_tensor_ccol_row_value_size(@ptrCast(&c_tensors), ccol_indices_.c_tensor,
                 row_indices_.c_tensor,
                 values_.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -25479,13 +25479,13 @@ pub const Tensor = struct {
     }
 
     pub fn sparseCsrTensorCrowColValueSize(
-        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, size_: []i64, options_: TensorOptions
+        crow_indices_: *const Tensor, col_indices_: *const Tensor, values_: *const Tensor, size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_csr_tensor_crow_col_value_size(@ptrCast(&c_tensors), crow_indices_.c_tensor,
                 col_indices_.c_tensor,
                 values_.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -25521,11 +25521,11 @@ pub const Tensor = struct {
     }
 
     pub fn sparseResize(
-        self: *const Tensor, size_: []i64, sparse_dim_: i64, dense_dim_: i64
+        self: *const Tensor, size_: []const i64, sparse_dim_: i64, dense_dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_resize(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 sparse_dim_,
                 dense_dim_);
         torch.readAndCleanError();
@@ -25533,11 +25533,11 @@ pub const Tensor = struct {
     }
 
     pub fn sparseResize_(
-        self: *Tensor, size_: []i64, sparse_dim_: i64, dense_dim_: i64
+        self: *Tensor, size_: []const i64, sparse_dim_: i64, dense_dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_resize_(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 sparse_dim_,
                 dense_dim_);
         torch.readAndCleanError();
@@ -25545,11 +25545,11 @@ pub const Tensor = struct {
     }
 
     pub fn sparseResizeAndClear(
-        self: *const Tensor, size_: []i64, sparse_dim_: i64, dense_dim_: i64
+        self: *const Tensor, size_: []const i64, sparse_dim_: i64, dense_dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_resize_and_clear(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 sparse_dim_,
                 dense_dim_);
         torch.readAndCleanError();
@@ -25557,11 +25557,11 @@ pub const Tensor = struct {
     }
 
     pub fn sparseResizeAndClear_(
-        self: *Tensor, size_: []i64, sparse_dim_: i64, dense_dim_: i64
+        self: *Tensor, size_: []const i64, sparse_dim_: i64, dense_dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_resize_and_clear_(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 sparse_dim_,
                 dense_dim_);
         torch.readAndCleanError();
@@ -25569,12 +25569,12 @@ pub const Tensor = struct {
     }
 
     pub fn sparseResizeAndClearOut(
-        self: *const Tensor, out: *const Tensor, size_: []i64, sparse_dim_: i64, dense_dim_: i64
+        self: *const Tensor, out: *const Tensor, size_: []const i64, sparse_dim_: i64, dense_dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_resize_and_clear_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 sparse_dim_,
                 dense_dim_);
         torch.readAndCleanError();
@@ -25582,12 +25582,12 @@ pub const Tensor = struct {
     }
 
     pub fn sparseResizeOut(
-        self: *const Tensor, out: *const Tensor, size_: []i64, sparse_dim_: i64, dense_dim_: i64
+        self: *const Tensor, out: *const Tensor, size_: []const i64, sparse_dim_: i64, dense_dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sparse_resize_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                size_.ptr, @intCast(size_.len),
+                @constCast(size_.ptr), @intCast(size_.len),
                 sparse_dim_,
                 dense_dim_);
         torch.readAndCleanError();
@@ -26578,7 +26578,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_logit(@ptrCast(&c_tensors), self.c_tensor,
-                eps orelse std.math.nan, (eps == null));
+                eps orelse std.math.nan(f64), @intFromBool(eps == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -26589,29 +26589,29 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_logit_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                eps orelse std.math.nan, (eps == null));
+                eps orelse std.math.nan(f64), @intFromBool(eps == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn specialLogsumexp(
-        self: *const Tensor, dim_: []i64, keepdim: bool
+        self: *const Tensor, dim_: []const i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_logsumexp(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn specialLogsumexpOut(
-        self: *const Tensor, out: *const Tensor, dim_: []i64, keepdim: bool
+        self: *const Tensor, out: *const Tensor, dim_: []const i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_logsumexp_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -27387,10 +27387,10 @@ pub const Tensor = struct {
     }
 
     pub fn splitSizes(
-        self: *const Tensor, split_size: []i64, dim_: i64
+        self: *const Tensor, split_size: []const i64, dim_: i64
     ) []Tensor {
         const c_tensors = __c.atg_split_sizes(self.c_tensor,
-                split_size.ptr, @intCast(split_size.len),
+                @constCast(split_size.ptr), @intCast(split_size.len),
                 dim_);
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
@@ -27404,10 +27404,10 @@ pub const Tensor = struct {
     }
 
     pub fn splitWithSizes(
-        self: *const Tensor, split_sizes_: []i64, dim_: i64
+        self: *const Tensor, split_sizes_: []const i64, dim_: i64
     ) []Tensor {
         const c_tensors = __c.atg_split_with_sizes(self.c_tensor,
-                split_sizes_.ptr, @intCast(split_sizes_.len),
+                @constCast(split_sizes_.ptr), @intCast(split_sizes_.len),
                 dim_);
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
@@ -27421,10 +27421,10 @@ pub const Tensor = struct {
     }
 
     pub fn splitWithSizesCopy(
-        self: *const Tensor, split_sizes_: []i64, dim_: i64
+        self: *const Tensor, split_sizes_: []const i64, dim_: i64
     ) []Tensor {
         const c_tensors = __c.atg_split_with_sizes_copy(self.c_tensor,
-                split_sizes_.ptr, @intCast(split_sizes_.len),
+                @constCast(split_sizes_.ptr), @intCast(split_sizes_.len),
                 dim_);
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
@@ -27438,11 +27438,11 @@ pub const Tensor = struct {
     }
 
     pub fn splitWithSizesCopyOut(
-        self: *const Tensor, out: []*const Tensor, split_sizes_: []i64, dim_: i64
+        self: *const Tensor, out: []*const Tensor, split_sizes_: []const i64, dim_: i64
     ) void {
         __c.atg_split_with_sizes_copy_out(ptrList(out).ptr, @intCast(out.len),
                 self.c_tensor,
-                split_sizes_.ptr, @intCast(split_sizes_.len),
+                @constCast(split_sizes_.ptr), @intCast(split_sizes_.len),
                 dim_);
         torch.readAndCleanError();
         return;
@@ -27553,22 +27553,22 @@ pub const Tensor = struct {
     }
 
     pub fn squeezeCopyDims(
-        self: *const Tensor, dim_: []i64
+        self: *const Tensor, dim_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_squeeze_copy_dims(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len));
+                @constCast(dim_.ptr), @intCast(dim_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn squeezeCopyDimsOut(
-        self: *const Tensor, out: *const Tensor, dim_: []i64
+        self: *const Tensor, out: *const Tensor, dim_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_squeeze_copy_dims_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len));
+                @constCast(dim_.ptr), @intCast(dim_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -27604,21 +27604,21 @@ pub const Tensor = struct {
     }
 
     pub fn squeezeDims(
-        self: *const Tensor, dim_: []i64
+        self: *const Tensor, dim_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_squeeze_dims(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len));
+                @constCast(dim_.ptr), @intCast(dim_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn squeezeDims_(
-        self: *Tensor, dim_: []i64
+        self: *Tensor, dim_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_squeeze_dims_(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len));
+                @constCast(dim_.ptr), @intCast(dim_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -27682,7 +27682,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_std_correction(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 correction.into().c_scalar,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
@@ -27695,7 +27695,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_std_correction_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 correction.into().c_scalar,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
@@ -27707,7 +27707,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_std_dim(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (unbiased)  1  else  0,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
@@ -27729,7 +27729,7 @@ pub const Tensor = struct {
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_std_mean_correction(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 correction.into().c_scalar,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
@@ -27743,7 +27743,7 @@ pub const Tensor = struct {
         __c.atg_std_mean_correction_out(@ptrCast(&c_tensors), out0.c_tensor,
                 out1.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 correction.into().c_scalar,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
@@ -27755,7 +27755,7 @@ pub const Tensor = struct {
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_std_mean_dim(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (unbiased)  1  else  0,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
@@ -27768,7 +27768,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_std_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (unbiased)  1  else  0,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
@@ -27781,8 +27781,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_stft(@ptrCast(&c_tensors), self.c_tensor,
                 n_fft,
-                hop_length orelse 0, (hop_length == null),
-                win_length orelse 0, (win_length == null),
+                hop_length orelse 0, @intFromBool(hop_length == null),
+                win_length orelse 0, @intFromBool(win_length == null),
                 if (window != null) window.?.c_tensor else null,
                 if (normalized)  1  else  0,
                 if (onesided)  1  else  0,
@@ -27797,11 +27797,11 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_stft_center(@ptrCast(&c_tensors), self.c_tensor,
                 n_fft,
-                hop_length orelse 0, (hop_length == null),
-                win_length orelse 0, (win_length == null),
+                hop_length orelse 0, @intFromBool(hop_length == null),
+                win_length orelse 0, @intFromBool(win_length == null),
                 if (window != null) window.?.c_tensor else null,
                 if (center)  1  else  0,
-                pad_mode.ptr, pad_mode.len,
+                @constCast(pad_mode.ptr), @intCast(pad_mode.len),
                 if (normalized)  1  else  0,
                 if (onesided)  1  else  0,
                 if (return_complex)  1  else  0);
@@ -27937,7 +27937,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sum_dim_intlist(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
         torch.readAndCleanError();
@@ -27950,7 +27950,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sum_intlist_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
         torch.readAndCleanError();
@@ -27969,11 +27969,11 @@ pub const Tensor = struct {
     }
 
     pub fn sumToSize(
-        self: *const Tensor, size_: []i64
+        self: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sum_to_size(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28100,7 +28100,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_take_along_dim(@ptrCast(&c_tensors), self.c_tensor,
                 indices_.c_tensor,
-                dim_ orelse 0, (dim_ == null));
+                dim_ orelse 0, @intFromBool(dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28112,7 +28112,7 @@ pub const Tensor = struct {
         __c.atg_take_along_dim_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 indices_.c_tensor,
-                dim_ orelse 0, (dim_ == null));
+                dim_ orelse 0, @intFromBool(dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28223,10 +28223,10 @@ pub const Tensor = struct {
     }
 
     pub fn tensorSplitIndices(
-        self: *const Tensor, indices_: []i64, dim_: i64
+        self: *const Tensor, indices_: []const i64, dim_: i64
     ) []Tensor {
         const c_tensors = __c.atg_tensor_split_indices(self.c_tensor,
-                indices_.ptr, @intCast(indices_.len),
+                @constCast(indices_.ptr), @intCast(indices_.len),
                 dim_);
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
@@ -28257,26 +28257,26 @@ pub const Tensor = struct {
     }
 
     pub fn tensordot(
-        self: *const Tensor, other: *const Tensor, dims_self: []i64, dims_other: []i64
+        self: *const Tensor, other: *const Tensor, dims_self: []const i64, dims_other: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_tensordot(@ptrCast(&c_tensors), self.c_tensor,
                 other.c_tensor,
-                dims_self.ptr, @intCast(dims_self.len),
-                dims_other.ptr, @intCast(dims_other.len));
+                @constCast(dims_self.ptr), @intCast(dims_self.len),
+                @constCast(dims_other.ptr), @intCast(dims_other.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn tensordotOut(
-        self: *const Tensor, out: *const Tensor, other: *const Tensor, dims_self: []i64, dims_other: []i64
+        self: *const Tensor, out: *const Tensor, other: *const Tensor, dims_self: []const i64, dims_other: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_tensordot_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 other.c_tensor,
-                dims_self.ptr, @intCast(dims_self.len),
-                dims_other.ptr, @intCast(dims_other.len));
+                @constCast(dims_self.ptr), @intCast(dims_self.len),
+                @constCast(dims_other.ptr), @intCast(dims_other.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28339,11 +28339,11 @@ pub const Tensor = struct {
     }
 
     pub fn tile(
-        self: *const Tensor, dims: []i64
+        self: *const Tensor, dims: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_tile(@ptrCast(&c_tensors), self.c_tensor,
-                dims.ptr, @intCast(dims.len));
+                @constCast(dims.ptr), @intCast(dims.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28466,7 +28466,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_padded_tensor(@ptrCast(&c_tensors), self.c_tensor,
                 padding,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28478,7 +28478,7 @@ pub const Tensor = struct {
         __c.atg_to_padded_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 padding,
-                output_size.ptr, @intCast(output_size.len));
+                @constCast(output_size.ptr), @intCast(output_size.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28489,30 +28489,30 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_sparse(@ptrCast(&c_tensors), self.c_tensor,
                 layout orelse - 1,
-                blocksize.ptr, @intCast(blocksize.len),
-                dense_dim_ orelse 0, (dense_dim_ == null));
+                @constCast(blocksize.ptr), @intCast(blocksize.len),
+                dense_dim_ orelse 0, @intFromBool(dense_dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn toSparseBsc(
-        self: *const Tensor, blocksize: []i64, dense_dim_: ?i64
+        self: *const Tensor, blocksize: []const i64, dense_dim_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_sparse_bsc(@ptrCast(&c_tensors), self.c_tensor,
-                blocksize.ptr, @intCast(blocksize.len),
-                dense_dim_ orelse 0, (dense_dim_ == null));
+                @constCast(blocksize.ptr), @intCast(blocksize.len),
+                dense_dim_ orelse 0, @intFromBool(dense_dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn toSparseBsr(
-        self: *const Tensor, blocksize: []i64, dense_dim_: ?i64
+        self: *const Tensor, blocksize: []const i64, dense_dim_: ?i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_sparse_bsr(@ptrCast(&c_tensors), self.c_tensor,
-                blocksize.ptr, @intCast(blocksize.len),
-                dense_dim_ orelse 0, (dense_dim_ == null));
+                @constCast(blocksize.ptr), @intCast(blocksize.len),
+                dense_dim_ orelse 0, @intFromBool(dense_dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28522,7 +28522,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_sparse_csc(@ptrCast(&c_tensors), self.c_tensor,
-                dense_dim_ orelse 0, (dense_dim_ == null));
+                dense_dim_ orelse 0, @intFromBool(dense_dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28532,7 +28532,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_sparse_csr(@ptrCast(&c_tensors), self.c_tensor,
-                dense_dim_ orelse 0, (dense_dim_ == null));
+                dense_dim_ orelse 0, @intFromBool(dense_dim_ == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28595,11 +28595,11 @@ pub const Tensor = struct {
     }
 
     pub fn traceBackward(
-        gradient: *const Tensor, sizes: []i64
+        gradient: *const Tensor, sizes: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_trace_backward(@ptrCast(&c_tensors), gradient.c_tensor,
-                sizes.ptr, @intCast(sizes.len));
+                @constCast(sizes.ptr), @intCast(sizes.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28796,7 +28796,7 @@ pub const Tensor = struct {
                 p,
                 eps,
                 if (swap)  1  else  0,
-                reduction.to_int());
+                reduction.toInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28988,12 +28988,12 @@ pub const Tensor = struct {
     }
 
     pub fn unflatten(
-        self: *const Tensor, dim_: i64, sizes: []i64
+        self: *const Tensor, dim_: i64, sizes: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_unflatten(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
-                sizes.ptr, @intCast(sizes.len));
+                @constCast(sizes.ptr), @intCast(sizes.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -29027,11 +29027,11 @@ pub const Tensor = struct {
     }
 
     pub fn unfoldBackward(
-        grad_in: *const Tensor, input_sizes: []i64, dim_: i64, size_: i64, step: i64
+        grad_in: *const Tensor, input_sizes: []const i64, dim_: i64, size_: i64, step: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_unfold_backward(@ptrCast(&c_tensors), grad_in.c_tensor,
-                input_sizes.ptr, @intCast(input_sizes.len),
+                @constCast(input_sizes.ptr), @intCast(input_sizes.len),
                 dim_,
                 size_,
                 step);
@@ -29040,12 +29040,12 @@ pub const Tensor = struct {
     }
 
     pub fn unfoldBackwardOut(
-        out: *const Tensor, grad_in: *const Tensor, input_sizes: []i64, dim_: i64, size_: i64, step: i64
+        out: *const Tensor, grad_in: *const Tensor, input_sizes: []const i64, dim_: i64, size_: i64, step: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_unfold_backward_out(@ptrCast(&c_tensors), out.c_tensor,
                 grad_in.c_tensor,
-                input_sizes.ptr, @intCast(input_sizes.len),
+                @constCast(input_sizes.ptr), @intCast(input_sizes.len),
                 dim_,
                 size_,
                 step);
@@ -29119,7 +29119,7 @@ pub const Tensor = struct {
         __c.atg_unique_consecutive(@ptrCast(&c_tensors), self.c_tensor,
                 if (return_inverse)  1  else  0,
                 if (return_counts)  1  else  0,
-                dim_ orelse 0, (dim_ == null));
+                dim_ orelse 0, @intFromBool(dim_ == null));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }};
     }
@@ -29134,7 +29134,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 if (return_inverse)  1  else  0,
                 if (return_counts)  1  else  0,
-                dim_ orelse 0, (dim_ == null));
+                dim_ orelse 0, @intFromBool(dim_ == null));
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }, Tensor { .c_tensor = c_tensors[2] }};
     }
@@ -29241,10 +29241,10 @@ pub const Tensor = struct {
     }
 
     pub fn unsafeSplitWithSizes(
-        self: *const Tensor, split_sizes_: []i64, dim_: i64
+        self: *const Tensor, split_sizes_: []const i64, dim_: i64
     ) []Tensor {
         const c_tensors = __c.atg_unsafe_split_with_sizes(self.c_tensor,
-                split_sizes_.ptr, @intCast(split_sizes_.len),
+                @constCast(split_sizes_.ptr), @intCast(split_sizes_.len),
                 dim_);
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
@@ -29258,11 +29258,11 @@ pub const Tensor = struct {
     }
 
     pub fn unsafeSplitWithSizesOut(
-        self: *const Tensor, out: []*const Tensor, split_sizes_: []i64, dim_: i64
+        self: *const Tensor, out: []*const Tensor, split_sizes_: []const i64, dim_: i64
     ) void {
         __c.atg_unsafe_split_with_sizes_out(ptrList(out).ptr, @intCast(out.len),
                 self.c_tensor,
-                split_sizes_.ptr, @intCast(split_sizes_.len),
+                @constCast(split_sizes_.ptr), @intCast(split_sizes_.len),
                 dim_);
         torch.readAndCleanError();
         return;
@@ -29310,57 +29310,57 @@ pub const Tensor = struct {
     }
 
     pub fn upsampleBicubic2d(
-        self: *const Tensor, output_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, output_size: []const i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_bicubic2d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 if (align_corners)  1  else  0,
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleBicubic2dBackward(
-        grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_bicubic2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
                 if (align_corners)  1  else  0,
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleBicubic2dBackwardGradInput(
-        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_bicubic2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
                 if (align_corners)  1  else  0,
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleBicubic2dOut(
-        self: *const Tensor, out: *const Tensor, output_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []const i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_bicubic2d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 if (align_corners)  1  else  0,
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -29370,65 +29370,65 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_bicubic2d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 if (align_corners)  1  else  0,
-                scale_factors.ptr, @intCast(scale_factors.len));
+                @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleBilinear2d(
-        self: *const Tensor, output_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, output_size: []const i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_bilinear2d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 if (align_corners)  1  else  0,
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleBilinear2dBackward(
-        grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_bilinear2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
                 if (align_corners)  1  else  0,
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleBilinear2dBackwardGradInput(
-        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_bilinear2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
                 if (align_corners)  1  else  0,
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleBilinear2dOut(
-        self: *const Tensor, out: *const Tensor, output_size: []i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []const i64, align_corners: bool, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_bilinear2d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 if (align_corners)  1  else  0,
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -29438,61 +29438,61 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_bilinear2d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 if (align_corners)  1  else  0,
-                scale_factors.ptr, @intCast(scale_factors.len));
+                @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleLinear1d(
-        self: *const Tensor, output_size: []i64, align_corners: bool, scales: ?f64
+        self: *const Tensor, output_size: []const i64, align_corners: bool, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_linear1d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 if (align_corners)  1  else  0,
-                scales orelse std.math.nan, (scales == null));
+                scales orelse std.math.nan(f64), @intFromBool(scales == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleLinear1dBackward(
-        grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales: ?f64
+        grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, align_corners: bool, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_linear1d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
                 if (align_corners)  1  else  0,
-                scales orelse std.math.nan, (scales == null));
+                scales orelse std.math.nan(f64), @intFromBool(scales == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleLinear1dBackwardGradInput(
-        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, align_corners: bool, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_linear1d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
                 if (align_corners)  1  else  0,
-                scales orelse std.math.nan, (scales == null));
+                scales orelse std.math.nan(f64), @intFromBool(scales == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleLinear1dOut(
-        self: *const Tensor, out: *const Tensor, output_size: []i64, align_corners: bool, scales: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []const i64, align_corners: bool, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_linear1d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 if (align_corners)  1  else  0,
-                scales orelse std.math.nan, (scales == null));
+                scales orelse std.math.nan(f64), @intFromBool(scales == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -29502,57 +29502,57 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_linear1d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 if (align_corners)  1  else  0,
-                scale_factors.ptr, @intCast(scale_factors.len));
+                @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleNearest1d(
-        self: *const Tensor, output_size: []i64, scales: ?f64
+        self: *const Tensor, output_size: []const i64, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest1d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                scales orelse std.math.nan, (scales == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                scales orelse std.math.nan(f64), @intFromBool(scales == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleNearest1dBackward(
-        grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales: ?f64
+        grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest1d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
-                scales orelse std.math.nan, (scales == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
+                scales orelse std.math.nan(f64), @intFromBool(scales == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleNearest1dBackwardGradInput(
-        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest1d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
-                scales orelse std.math.nan, (scales == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
+                scales orelse std.math.nan(f64), @intFromBool(scales == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleNearest1dOut(
-        self: *const Tensor, out: *const Tensor, output_size: []i64, scales: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []const i64, scales: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest1d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                scales orelse std.math.nan, (scales == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                scales orelse std.math.nan(f64), @intFromBool(scales == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -29562,60 +29562,60 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest1d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                scale_factors.ptr, @intCast(scale_factors.len));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleNearest2d(
-        self: *const Tensor, output_size: []i64, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, output_size: []const i64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest2d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleNearest2dBackward(
-        grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales_h: ?f64, scales_w: ?f64
+        grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleNearest2dBackwardGradInput(
-        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales_h: ?f64, scales_w: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleNearest2dOut(
-        self: *const Tensor, out: *const Tensor, output_size: []i64, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []const i64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest2d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -29625,64 +29625,64 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest2d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                scale_factors.ptr, @intCast(scale_factors.len));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleNearest3d(
-        self: *const Tensor, output_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, output_size: []const i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest3d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                scales_d orelse std.math.nan, (scales_d == null),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                scales_d orelse std.math.nan(f64), @intFromBool(scales_d == null),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleNearest3dBackward(
-        grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest3d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
-                scales_d orelse std.math.nan, (scales_d == null),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
+                scales_d orelse std.math.nan(f64), @intFromBool(scales_d == null),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleNearest3dBackwardGradInput(
-        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest3d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
-                scales_d orelse std.math.nan, (scales_d == null),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
+                scales_d orelse std.math.nan(f64), @intFromBool(scales_d == null),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleNearest3dOut(
-        self: *const Tensor, out: *const Tensor, output_size: []i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []const i64, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest3d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                scales_d orelse std.math.nan, (scales_d == null),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                scales_d orelse std.math.nan(f64), @intFromBool(scales_d == null),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -29692,68 +29692,68 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest3d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                scale_factors.ptr, @intCast(scale_factors.len));
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleTrilinear3d(
-        self: *const Tensor, output_size: []i64, align_corners: bool, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, output_size: []const i64, align_corners: bool, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_trilinear3d(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 if (align_corners)  1  else  0,
-                scales_d orelse std.math.nan, (scales_d == null),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_d orelse std.math.nan(f64), @intFromBool(scales_d == null),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleTrilinear3dBackward(
-        grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, align_corners: bool, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_trilinear3d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
                 if (align_corners)  1  else  0,
-                scales_d orelse std.math.nan, (scales_d == null),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_d orelse std.math.nan(f64), @intFromBool(scales_d == null),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleTrilinear3dBackwardGradInput(
-        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []i64, input_size: []i64, align_corners: bool, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        grad_input: *const Tensor, grad_output: *const Tensor, output_size: []const i64, input_size: []const i64, align_corners: bool, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_trilinear3d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
-                input_size.ptr, @intCast(input_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(input_size.ptr), @intCast(input_size.len),
                 if (align_corners)  1  else  0,
-                scales_d orelse std.math.nan, (scales_d == null),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_d orelse std.math.nan(f64), @intFromBool(scales_d == null),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn upsampleTrilinear3dOut(
-        self: *const Tensor, out: *const Tensor, output_size: []i64, align_corners: bool, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
+        self: *const Tensor, out: *const Tensor, output_size: []const i64, align_corners: bool, scales_d: ?f64, scales_h: ?f64, scales_w: ?f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_trilinear3d_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 if (align_corners)  1  else  0,
-                scales_d orelse std.math.nan, (scales_d == null),
-                scales_h orelse std.math.nan, (scales_h == null),
-                scales_w orelse std.math.nan, (scales_w == null));
+                scales_d orelse std.math.nan(f64), @intFromBool(scales_d == null),
+                scales_h orelse std.math.nan(f64), @intFromBool(scales_h == null),
+                scales_w orelse std.math.nan(f64), @intFromBool(scales_w == null));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -29763,21 +29763,21 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_trilinear3d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                output_size.ptr, @intCast(output_size.len),
+                @constCast(output_size.ptr), @intCast(output_size.len),
                 if (align_corners)  1  else  0,
-                scale_factors.ptr, @intCast(scale_factors.len));
+                @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
 
     pub fn valueSelectingReductionBackward(
-        gradient: *const Tensor, dim_: i64, indices_: *const Tensor, sizes: []i64, keepdim: bool
+        gradient: *const Tensor, dim_: i64, indices_: *const Tensor, sizes: []const i64, keepdim: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_value_selecting_reduction_backward(@ptrCast(&c_tensors), gradient.c_tensor,
                 dim_,
                 indices_.c_tensor,
-                sizes.ptr, @intCast(sizes.len),
+                @constCast(sizes.ptr), @intCast(sizes.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -29816,7 +29816,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_vander(@ptrCast(&c_tensors), x.c_tensor,
-                n orelse 0, (n == null),
+                n orelse 0, @intFromBool(n == null),
                 if (increasing)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -29837,7 +29837,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_var_correction(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 correction.into().c_scalar,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
@@ -29850,7 +29850,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_var_correction_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 correction.into().c_scalar,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
@@ -29862,7 +29862,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_var_dim(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (unbiased)  1  else  0,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
@@ -29884,7 +29884,7 @@ pub const Tensor = struct {
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_var_mean_correction(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 correction.into().c_scalar,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
@@ -29898,7 +29898,7 @@ pub const Tensor = struct {
         __c.atg_var_mean_correction_out(@ptrCast(&c_tensors), out0.c_tensor,
                 out1.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 correction.into().c_scalar,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
@@ -29910,7 +29910,7 @@ pub const Tensor = struct {
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_var_mean_dim(@ptrCast(&c_tensors), self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (unbiased)  1  else  0,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
@@ -29923,7 +29923,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_var_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dim_.ptr, @intCast(dim_.len),
+                @constCast(dim_.ptr), @intCast(dim_.len),
                 if (unbiased)  1  else  0,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
@@ -29952,11 +29952,11 @@ pub const Tensor = struct {
     }
 
     pub fn view(
-        self: *const Tensor, size_: []i64
+        self: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_view(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -30028,11 +30028,11 @@ pub const Tensor = struct {
     }
 
     pub fn viewCopy(
-        self: *const Tensor, size_: []i64
+        self: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_view_copy(@ptrCast(&c_tensors), self.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -30059,12 +30059,12 @@ pub const Tensor = struct {
     }
 
     pub fn viewCopyOut(
-        self: *const Tensor, out: *const Tensor, size_: []i64
+        self: *const Tensor, out: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_view_copy_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -30096,10 +30096,10 @@ pub const Tensor = struct {
     }
 
     pub fn vsplitArray(
-        self: *const Tensor, indices_: []i64
+        self: *const Tensor, indices_: []const i64
     ) []Tensor {
         const c_tensors = __c.atg_vsplit_array(self.c_tensor,
-                indices_.ptr, @intCast(indices_.len));
+                @constCast(indices_.ptr), @intCast(indices_.len));
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
         while (true) {
@@ -30313,10 +30313,10 @@ pub const Tensor = struct {
     }
 
     pub fn zeros(
-        size_: []i64, options_: TensorOptions
+        size_: []const i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_zeros(@ptrCast(&c_tensors), size_.ptr, @intCast(size_.len),
+        __c.atg_zeros(@ptrCast(&c_tensors), @constCast(size_.ptr), @intCast(size_.len),
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -30342,11 +30342,11 @@ pub const Tensor = struct {
     }
 
     pub fn zerosOut(
-        out: *const Tensor, size_: []i64
+        out: *const Tensor, size_: []const i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_zeros_out(@ptrCast(&c_tensors), out.c_tensor,
-                size_.ptr, @intCast(size_.len));
+                @constCast(size_.ptr), @intCast(size_.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }

@@ -592,15 +592,16 @@ module Func = struct
       | ScalarTypeOption -> Printf.sprintf "%s orelse -1" name
       | Device -> Printf.sprintf "%s.cInt()" name
       | TensorOptions -> Printf.sprintf "%s.kind.cInt(), %s.device.cInt()" name name
-      | Int64Option -> Printf.sprintf "%s orelse 0, (%s == null)" name name
-      | DoubleOption -> Printf.sprintf "%s orelse std.math.nan, (%s == null)" name name
-      | String -> Printf.sprintf "%s.ptr, %s.len" name name
+      | Int64Option -> Printf.sprintf "%s orelse 0, @intFromBool(%s == null)" name name
+      | DoubleOption ->
+        Printf.sprintf "%s orelse std.math.nan(f64), @intFromBool(%s == null)" name name
+      | String -> Printf.sprintf "@constCast(%s.ptr), @intCast(%s.len)" name name
       | IntList | IntListOption | DoubleList ->
-        Printf.sprintf "%s.ptr, @intCast(%s.len)" name name
+        Printf.sprintf "@constCast(%s.ptr), @intCast(%s.len)" name name
       | TensorOptList -> Printf.sprintf "ptrListOpt(%s).ptr, @intCast(%s.len)" name name
       | TensorList -> Printf.sprintf "ptrList(%s).ptr, @intCast(%s.len)" name name
       | TensorOption -> Printf.sprintf "if (%s != null) %s.?.c_tensor else null" name name
-      | Int64 when String.( = ) name "reduction" -> "reduction.to_int()"
+      | Int64 when String.( = ) name "reduction" -> "reduction.toInt()"
       | Layout -> Printf.sprintf "%s.toI8()" name
       | LayoutOption -> Printf.sprintf "%s orelse - 1" name
       | _ -> name)
@@ -618,7 +619,7 @@ module Func = struct
           | Double -> "f64"
           | Tensor -> "*const Tensor"
           | TensorOption -> "?*const Tensor"
-          | IntList -> "[]i64"
+          | IntList -> "[]const i64"
           | IntListOption -> "?[]i64"
           | DoubleList -> "[]f64"
           | TensorOptList -> "[]?*const Tensor"

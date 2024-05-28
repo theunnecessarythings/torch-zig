@@ -97,8 +97,7 @@ pub fn dirac_(tensor: *Tensor) Tensor {
     defer guard.deinit();
     const size = tensor.size();
     if (size.len < 3 or tensor.len > 5) {
-        std.log.err("Only tensors with 3, 4, or 5 dimensions are supported", .{});
-        unreachable;
+        @panic("Only tensors with 3, 4, or 5 dimensions are supported");
     }
     const min_dim = @min(size[0], size[1]);
     tensor.zero_();
@@ -124,8 +123,7 @@ pub fn eye_(matrix: *Tensor) Tensor {
     defer guard.deinit();
     const size = matrix.size();
     if (size.len != 2) {
-        std.log.err("Only tensors with 2 dimensions are supported", .{});
-        unreachable;
+        @panic("Only tensors with 2 dimensions are supported");
     }
     return Tensor.eyeMOut(matrix, size[0], size[1]);
 }
@@ -148,8 +146,7 @@ pub fn othogonal_(tensor: *Tensor, gain: f64) Tensor {
 
     const size = tensor.size();
     if (size.len < 2) {
-        std.log.err("Only tensors with 2 or more dimensions are supported", .{});
-        unreachable;
+        @panic("Only tensors with 2 or more dimensions are supported");
     }
 
     const rows = size[0];
@@ -179,8 +176,7 @@ pub fn sparse_(tensor: *Tensor, sparsity: f64, stdev: f64) Tensor {
 
     const size = tensor.size();
     if (size.len != 2) {
-        std.log.err("Only tensors with 2 dimensions are supported", .{});
-        unreachable;
+        @panic("Only tensors with 2 dimensions are supported");
     }
 
     const rows = size[0];
@@ -244,7 +240,7 @@ pub fn zeros_(tensor: *Tensor) Tensor {
 pub fn caclculateFanInAndFanOut(tensor: *const Tensor) [2]i64 {
     const size = tensor.size();
     if (size.len != 2) {
-        std.log.err("Only tensors with 2 dimensions are supported", .{});
+        std.log.warn("Only tensors with 2 dimensions are supported", .{});
     }
     var fan_in: i64 = 0;
     var fan_out: i64 = 0;

@@ -78,8 +78,7 @@ pub const Tensor = struct {
                 },
                 Tensor => TensorIndexer{ .IndexSelect = spec.shallowClone() },
                 else => {
-                    std.log.err("unsupported index spec type: {any}", .{@TypeOf(spec)});
-                    unreachable;
+                    @panic("unsupported index spec type");
                 },
             };
             specs.append(spec_) catch unreachable;
@@ -96,23 +95,20 @@ pub const Tensor = struct {
         }
         const dim_ = self.dim();
         if (index_spec.len > dim_ + n_newaxis) {
-            std.log.err("too many indices for tensor of dimension {d}", .{dim_});
-            unreachable;
+            @panic("too many indices for tensor");
         }
 
         for (index_spec) |spec| {
             switch (spec) {
                 .IndexSelect => |tensor| {
                     if (dim_ != 1) {
-                        std.log.err("expected 1-d tensor, got {}", .{dim_});
-                        unreachable;
+                        @panic("expected 1-d tensor");
                     }
 
                     switch (tensor.kind()) {
                         .Int64, .Int16, .Int8, .Int => {},
                         else => {
-                            std.log.err("expected int tensor for indices, got {}", .{tensor.kind()});
-                            unreachable;
+                            @panic("expected int tensor for indices");
                         },
                     }
                 },
@@ -137,8 +133,7 @@ pub const Tensor = struct {
                     const start = narrow_.start orelse 0;
                     const end = narrow_.end orelse size_[curr_idx];
                     if (start < 0 or end < start or end > size_[curr_idx]) {
-                        std.log.err("invalid start/end for narrow: start={}, end={}, shape={}", .{ start, end, size_[curr_idx] });
-                        unreachable;
+                        @panic("invalid start/end for narrow");
                     }
                     const length = end - start;
                     curr_tensor = curr_tensor.narrow(@intCast(curr_idx), start, length);
@@ -186,11 +181,10 @@ pub const Tensor = struct {
         return buffer[0..dim_];
     }
 
-    pub fn sizeDims(self: *const Tensor, comptime dims: usize) ![dims]i64 {
+    pub fn sizeDims(self: *const Tensor, comptime dims: usize) [dims]i64 {
         const size_ = self.size();
         if (size_.len != dims) {
-            std.log.err("expected {} dims, got {}", .{ dims, size_.len });
-            return error.UnexpectedDimension;
+            @panic("expected one dim");
         }
         return size_[0..dims];
     }
@@ -207,8 +201,7 @@ pub const Tensor = struct {
     pub fn strideDims(self: *const Tensor, comptime dims: usize) ![dims]i64 {
         const stride_ = self.stride();
         if (stride_.len != dims) {
-            std.log.err("expected one dim, got {}", .{stride_.len});
-            return error.UnexpectedDimension;
+            @panic("expected one dim");
         }
         return stride_[0..dims];
     }
