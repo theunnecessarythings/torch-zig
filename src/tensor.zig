@@ -78,8 +78,7 @@ pub const Tensor = struct {
                 },
                 Tensor => TensorIndexer{ .IndexSelect = spec.shallowClone() },
                 else => {
-                    std.log.err("unsupported index spec type: {any}", .{@TypeOf(spec)});
-                    unreachable;
+                    @panic("unsupported index spec type");
                 },
             };
             specs.append(spec_) catch unreachable;
@@ -96,23 +95,20 @@ pub const Tensor = struct {
         }
         const dim_ = self.dim();
         if (index_spec.len > dim_ + n_newaxis) {
-            std.log.err("too many indices for tensor of dimension {d}", .{dim_});
-            unreachable;
+            @panic("too many indices for tensor");
         }
 
         for (index_spec) |spec| {
             switch (spec) {
                 .IndexSelect => |tensor| {
                     if (dim_ != 1) {
-                        std.log.err("expected 1-d tensor, got {}", .{dim_});
-                        unreachable;
+                        @panic("expected 1-d tensor");
                     }
 
                     switch (tensor.kind()) {
                         .Int64, .Int16, .Int8, .Int => {},
                         else => {
-                            std.log.err("expected int tensor for indices, got {}", .{tensor.kind()});
-                            unreachable;
+                            @panic("expected int tensor for indices");
                         },
                     }
                 },
@@ -137,8 +133,7 @@ pub const Tensor = struct {
                     const start = narrow_.start orelse 0;
                     const end = narrow_.end orelse size_[curr_idx];
                     if (start < 0 or end < start or end > size_[curr_idx]) {
-                        std.log.err("invalid start/end for narrow: start={}, end={}, shape={}", .{ start, end, size_[curr_idx] });
-                        unreachable;
+                        @panic("invalid start/end for narrow");
                     }
                     const length = end - start;
                     curr_tensor = curr_tensor.narrow(@intCast(curr_idx), start, length);
@@ -186,11 +181,10 @@ pub const Tensor = struct {
         return buffer[0..dim_];
     }
 
-    pub fn sizeDims(self: *const Tensor, comptime dims: usize) ![dims]i64 {
+    pub fn sizeDims(self: *const Tensor, comptime dims: usize) [dims]i64 {
         const size_ = self.size();
         if (size_.len != dims) {
-            std.log.err("expected {} dims, got {}", .{ dims, size_.len });
-            return error.UnexpectedDimension;
+            @panic("expected one dim");
         }
         return size_[0..dims];
     }
@@ -207,8 +201,7 @@ pub const Tensor = struct {
     pub fn strideDims(self: *const Tensor, comptime dims: usize) ![dims]i64 {
         const stride_ = self.stride();
         if (stride_.len != dims) {
-            std.log.err("expected one dim, got {}", .{stride_.len});
-            return error.UnexpectedDimension;
+            @panic("expected one dim");
         }
         return stride_[0..dims];
     }
@@ -230,14 +223,14 @@ pub const Tensor = struct {
         torch.readAndCleanError();
     }
 
-    pub fn doubleValue(self: *const Tensor, idx: []i64) f64 {
-        const ret = __c.at_double_value_at_indexes(self.c_tensor, idx.items, idx.len);
+    pub fn doubleValue(self: *const Tensor, idx: []const i64) f64 {
+        const ret = __c.at_double_value_at_indexes(self.c_tensor, @constCast(@ptrCast(idx)), @intCast(idx.len));
         torch.readAndCleanError();
         return ret;
     }
 
-    pub fn int64Value(self: *const Tensor, idx: []i64) i64 {
-        const ret = __c.at_int64_value_at_indexes(self.c_tensor, idx.items, idx.len);
+    pub fn int64Value(self: *const Tensor, idx: []const i64) i64 {
+        const ret = __c.at_int64_value_at_indexes(self.c_tensor, @constCast(@ptrCast(idx)), @intCast(idx.len));
         torch.readAndCleanError();
         return ret;
     }
@@ -406,7 +399,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___and__(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -426,7 +419,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___iand__(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -446,7 +439,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___ilshift__(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -466,7 +459,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___ior__(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -486,7 +479,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___irshift__(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -506,7 +499,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___ixor__(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -526,7 +519,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___lshift__(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -537,7 +530,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___lshift__scalar_out_(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -568,7 +561,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___or__(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -588,7 +581,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___rshift__(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -599,7 +592,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___rshift__scalar_out_(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -630,7 +623,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg___xor__(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -776,7 +769,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__add_relu_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -786,7 +779,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__add_relu_scalar_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -797,7 +790,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__add_relu_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -917,7 +910,7 @@ pub const Tensor = struct {
     pub fn internalAssertScalar(
         self_scalar: Scalar, assert_msg: []const u8
     ) void {
-        __c.atg__assert_scalar(self_scalar.into().c_scalar,
+        __c.atg__assert_scalar(self_scalar.c_scalar,
                 @constCast(assert_msg.ptr), @intCast(assert_msg.len));
         torch.readAndCleanError();
         return;
@@ -2375,7 +2368,7 @@ pub const Tensor = struct {
         self_scalar: Scalar, assert_msg: []const u8, dep_token: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg__functional_assert_scalar(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
+        __c.atg__functional_assert_scalar(@ptrCast(&c_tensors), self_scalar.c_scalar,
                 @constCast(assert_msg.ptr), @intCast(assert_msg.len),
                 dep_token.c_tensor);
         torch.readAndCleanError();
@@ -2386,7 +2379,7 @@ pub const Tensor = struct {
         size_: Scalar, min_: ?i64, max_: ?i64, dep_token: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg__functional_sym_constrain_range(@ptrCast(&c_tensors), size_.into().c_scalar,
+        __c.atg__functional_sym_constrain_range(@ptrCast(&c_tensors), size_.c_scalar,
                 min_ orelse 0, @intFromBool(min_ == null),
                 max_ orelse 0, @intFromBool(max_ == null),
                 dep_token.c_tensor);
@@ -2398,7 +2391,7 @@ pub const Tensor = struct {
         size_: Scalar, min_: ?i64, max_: ?i64, dep_token: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg__functional_sym_constrain_range_for_size(@ptrCast(&c_tensors), size_.into().c_scalar,
+        __c.atg__functional_sym_constrain_range_for_size(@ptrCast(&c_tensors), size_.c_scalar,
                 min_ orelse 0, @intFromBool(min_ == null),
                 max_ orelse 0, @intFromBool(max_ == null),
                 dep_token.c_tensor);
@@ -3898,7 +3891,7 @@ pub const Tensor = struct {
         __c.atg__pad_packed_sequence(@ptrCast(&c_tensors), data_.c_tensor,
                 batch_sizes.c_tensor,
                 if (batch_first)  1  else  0,
-                padding_value.into().c_scalar,
+                padding_value.c_scalar,
                 total_length);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
@@ -4318,7 +4311,7 @@ pub const Tensor = struct {
                 if (lengths != null) lengths.?.c_tensor else null,
                 if (offsets != null) offsets.?.c_tensor else null,
                 axis,
-                initial.into().c_scalar);
+                initial.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -4335,7 +4328,7 @@ pub const Tensor = struct {
                 if (lengths != null) lengths.?.c_tensor else null,
                 if (offsets != null) offsets.?.c_tensor else null,
                 axis,
-                initial.into().c_scalar);
+                initial.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -6645,7 +6638,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_add_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -6655,7 +6648,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_add_scalar_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -6666,7 +6659,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_add_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -7228,7 +7221,7 @@ pub const Tensor = struct {
         end: Scalar, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_arange(@ptrCast(&c_tensors), end.into().c_scalar,
+        __c.atg_arange(@ptrCast(&c_tensors), end.c_scalar,
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -7238,8 +7231,8 @@ pub const Tensor = struct {
         start: Scalar, end: Scalar, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_arange_start(@ptrCast(&c_tensors), start.into().c_scalar,
-                end.into().c_scalar,
+        __c.atg_arange_start(@ptrCast(&c_tensors), start.c_scalar,
+                end.c_scalar,
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -7249,9 +7242,9 @@ pub const Tensor = struct {
         start: Scalar, end: Scalar, step: Scalar, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_arange_start_step(@ptrCast(&c_tensors), start.into().c_scalar,
-                end.into().c_scalar,
-                step.into().c_scalar,
+        __c.atg_arange_start_step(@ptrCast(&c_tensors), start.c_scalar,
+                end.c_scalar,
+                step.c_scalar,
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -7987,8 +7980,8 @@ pub const Tensor = struct {
         __c.atg_baddbmm(@ptrCast(&c_tensors), self.c_tensor,
                 batch1.c_tensor,
                 batch2.c_tensor,
-                beta.into().c_scalar,
-                alpha.into().c_scalar);
+                beta.c_scalar,
+                alpha.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8478,7 +8471,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_and(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8488,7 +8481,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_and_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8499,7 +8492,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_and_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8508,7 +8501,7 @@ pub const Tensor = struct {
         self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_bitwise_and_scalar_tensor(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
+        __c.atg_bitwise_and_scalar_tensor(@ptrCast(&c_tensors), self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -8519,7 +8512,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_and_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
-                self_scalar.into().c_scalar,
+                self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -8580,7 +8573,7 @@ pub const Tensor = struct {
         self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_bitwise_left_shift_scalar_tensor(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
+        __c.atg_bitwise_left_shift_scalar_tensor(@ptrCast(&c_tensors), self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -8591,7 +8584,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_left_shift_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
-                self_scalar.into().c_scalar,
+                self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -8613,7 +8606,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_left_shift_tensor_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8623,7 +8616,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_left_shift_tensor_scalar_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8634,7 +8627,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_left_shift_tensor_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8672,7 +8665,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_or(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8682,7 +8675,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_or_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8693,7 +8686,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_or_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8702,7 +8695,7 @@ pub const Tensor = struct {
         self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_bitwise_or_scalar_tensor(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
+        __c.atg_bitwise_or_scalar_tensor(@ptrCast(&c_tensors), self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -8713,7 +8706,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_or_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
-                self_scalar.into().c_scalar,
+                self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -8774,7 +8767,7 @@ pub const Tensor = struct {
         self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_bitwise_right_shift_scalar_tensor(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
+        __c.atg_bitwise_right_shift_scalar_tensor(@ptrCast(&c_tensors), self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -8785,7 +8778,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_right_shift_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
-                self_scalar.into().c_scalar,
+                self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -8807,7 +8800,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_right_shift_tensor_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8817,7 +8810,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_right_shift_tensor_scalar_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8828,7 +8821,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_right_shift_tensor_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8838,7 +8831,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_xor(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8848,7 +8841,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_xor_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8859,7 +8852,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_xor_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -8868,7 +8861,7 @@ pub const Tensor = struct {
         self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_bitwise_xor_scalar_tensor(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
+        __c.atg_bitwise_xor_scalar_tensor(@ptrCast(&c_tensors), self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -8879,7 +8872,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bitwise_xor_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
-                self_scalar.into().c_scalar,
+                self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -9039,7 +9032,7 @@ pub const Tensor = struct {
         self_scalar: Scalar, boundaries: *const Tensor, out_int32: bool, right: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_bucketize_scalar(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
+        __c.atg_bucketize_scalar(@ptrCast(&c_tensors), self_scalar.c_scalar,
                 boundaries.c_tensor,
                 if (out_int32)  1  else  0,
                 if (right)  1  else  0);
@@ -9052,7 +9045,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_bucketize_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
-                self_scalar.into().c_scalar,
+                self_scalar.c_scalar,
                 boundaries.c_tensor,
                 if (out_int32)  1  else  0,
                 if (right)  1  else  0);
@@ -9391,8 +9384,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp(@ptrCast(&c_tensors), self.c_tensor,
-                min_.into().c_scalar,
-                max_.into().c_scalar);
+                min_.c_scalar,
+                max_.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -9402,8 +9395,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_(@ptrCast(&c_tensors), self.c_tensor,
-                min_.into().c_scalar,
-                max_.into().c_scalar);
+                min_.c_scalar,
+                max_.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -9413,7 +9406,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_max(@ptrCast(&c_tensors), self.c_tensor,
-                max_.into().c_scalar);
+                max_.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -9423,7 +9416,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_max_(@ptrCast(&c_tensors), self.c_tensor,
-                max_.into().c_scalar);
+                max_.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -9434,7 +9427,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_max_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                max_.into().c_scalar);
+                max_.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -9475,7 +9468,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_min(@ptrCast(&c_tensors), self.c_tensor,
-                min_.into().c_scalar);
+                min_.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -9485,7 +9478,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_min_(@ptrCast(&c_tensors), self.c_tensor,
-                min_.into().c_scalar);
+                min_.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -9496,7 +9489,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_min_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                min_.into().c_scalar);
+                min_.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -9538,8 +9531,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clamp_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                min_.into().c_scalar,
-                max_.into().c_scalar);
+                min_.c_scalar,
+                max_.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -9583,8 +9576,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clip(@ptrCast(&c_tensors), self.c_tensor,
-                min_.into().c_scalar,
-                max_.into().c_scalar);
+                min_.c_scalar,
+                max_.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -9594,8 +9587,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clip_(@ptrCast(&c_tensors), self.c_tensor,
-                min_.into().c_scalar,
-                max_.into().c_scalar);
+                min_.c_scalar,
+                max_.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -9606,8 +9599,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_clip_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                min_.into().c_scalar,
-                max_.into().c_scalar);
+                min_.c_scalar,
+                max_.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -10229,7 +10222,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_copysign_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -10239,7 +10232,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_copysign_scalar_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -10250,7 +10243,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_copysign_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -10645,7 +10638,7 @@ pub const Tensor = struct {
         __c.atg_cudnn_convolution_add_relu(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 z.c_tensor,
-                alpha.into().c_scalar,
+                alpha.c_scalar,
                 if (bias != null) bias.?.c_tensor else null,
                 @constCast(stride_.ptr), @intCast(stride_.len),
                 @constCast(padding.ptr), @intCast(padding.len),
@@ -10663,7 +10656,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 weight.c_tensor,
                 z.c_tensor,
-                alpha.into().c_scalar,
+                alpha.c_scalar,
                 if (bias != null) bias.?.c_tensor else null,
                 @constCast(stride_.ptr), @intCast(stride_.len),
                 @constCast(padding.ptr), @intCast(padding.len),
@@ -11374,7 +11367,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11384,7 +11377,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_scalar_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11394,7 +11387,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_scalar_mode(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar,
+                other.c_scalar,
                 @constCast(rounding_mode.ptr), @intCast(rounding_mode.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -11405,7 +11398,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_scalar_mode_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar,
+                other.c_scalar,
                 @constCast(rounding_mode.ptr), @intCast(rounding_mode.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -11417,7 +11410,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_scalar_mode_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar,
+                other.c_scalar,
                 @constCast(rounding_mode.ptr), @intCast(rounding_mode.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -11429,7 +11422,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_div_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11504,7 +11497,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_divide_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11514,7 +11507,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_divide_scalar_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11524,7 +11517,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_divide_scalar_mode(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar,
+                other.c_scalar,
                 @constCast(rounding_mode.ptr), @intCast(rounding_mode.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -11535,7 +11528,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_divide_scalar_mode_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar,
+                other.c_scalar,
                 @constCast(rounding_mode.ptr), @intCast(rounding_mode.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -11691,9 +11684,9 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_elu_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
-                alpha.into().c_scalar,
-                scale.into().c_scalar,
-                input_scale.into().c_scalar,
+                alpha.c_scalar,
+                scale.c_scalar,
+                input_scale.c_scalar,
                 if (is_result)  1  else  0,
                 self_or_result.c_tensor);
         torch.readAndCleanError();
@@ -11706,9 +11699,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_elu_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
-                alpha.into().c_scalar,
-                scale.into().c_scalar,
-                input_scale.into().c_scalar,
+                alpha.c_scalar,
+                scale.c_scalar,
+                input_scale.c_scalar,
                 if (is_result)  1  else  0,
                 self_or_result.c_tensor);
         torch.readAndCleanError();
@@ -11986,7 +11979,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_eq(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -11996,7 +11989,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_eq_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12007,7 +12000,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_eq_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -12485,8 +12478,8 @@ pub const Tensor = struct {
                 weight.c_tensor,
                 packed_.c_tensor,
                 col_offsets.c_tensor,
-                weight_scale.into().c_scalar,
-                weight_zero_point.into().c_scalar,
+                weight_scale.c_scalar,
+                weight_zero_point.c_scalar,
                 bias.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -12500,8 +12493,8 @@ pub const Tensor = struct {
                 weight.c_tensor,
                 packed_.c_tensor,
                 col_offsets.c_tensor,
-                weight_scale.into().c_scalar,
-                weight_zero_point.into().c_scalar,
+                weight_scale.c_scalar,
+                weight_zero_point.c_scalar,
                 bias.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -13099,7 +13092,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fill(@ptrCast(&c_tensors), self.c_tensor,
-                value.into().c_scalar);
+                value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13109,7 +13102,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fill_(@ptrCast(&c_tensors), self.c_tensor,
-                value.into().c_scalar);
+                value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13119,7 +13112,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fill_diagonal_(@ptrCast(&c_tensors), self.c_tensor,
-                fill_value.into().c_scalar,
+                fill_value.c_scalar,
                 if (wrap)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -13131,7 +13124,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fill_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                value.into().c_scalar);
+                value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13269,7 +13262,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_float_power_(@ptrCast(&c_tensors), self.c_tensor,
-                exponent.into().c_scalar);
+                exponent.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13278,7 +13271,7 @@ pub const Tensor = struct {
         self_scalar: Scalar, exponent: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_float_power_scalar(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
+        __c.atg_float_power_scalar(@ptrCast(&c_tensors), self_scalar.c_scalar,
                 exponent.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -13289,7 +13282,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_float_power_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
-                self_scalar.into().c_scalar,
+                self_scalar.c_scalar,
                 exponent.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -13310,7 +13303,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_float_power_tensor_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                exponent.into().c_scalar);
+                exponent.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13321,7 +13314,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_float_power_tensor_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                exponent.into().c_scalar);
+                exponent.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13391,7 +13384,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_floor_divide_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13401,7 +13394,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_floor_divide_scalar_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13412,7 +13405,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_floor_divide_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13474,7 +13467,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fmod(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13484,7 +13477,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fmod_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13495,7 +13488,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fmod_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13737,7 +13730,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_full(@ptrCast(&c_tensors), @constCast(size_.ptr), @intCast(size_.len),
-                fill_value.into().c_scalar,
+                fill_value.c_scalar,
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -13748,7 +13741,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_full_like(@ptrCast(&c_tensors), self.c_tensor,
-                fill_value.into().c_scalar);
+                fill_value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13759,7 +13752,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_full_like_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                fill_value.into().c_scalar);
+                fill_value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13770,7 +13763,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_full_out(@ptrCast(&c_tensors), out.c_tensor,
                 @constCast(size_.ptr), @intCast(size_.len),
-                fill_value.into().c_scalar);
+                fill_value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13870,7 +13863,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ge(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13880,7 +13873,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ge_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -13891,7 +13884,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ge_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -14165,7 +14158,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_greater(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -14175,7 +14168,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_greater_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -14185,7 +14178,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_greater_equal(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -14195,7 +14188,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_greater_equal_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -14206,7 +14199,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_greater_equal_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -14248,7 +14241,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_greater_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -14418,7 +14411,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gt(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -14428,7 +14421,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gt_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -14439,7 +14432,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_gt_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -14624,7 +14617,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hardshrink_backward(@ptrCast(&c_tensors), grad_out.c_tensor,
                 self.c_tensor,
-                lambd.into().c_scalar);
+                lambd.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -14636,7 +14629,7 @@ pub const Tensor = struct {
         __c.atg_hardshrink_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_out.c_tensor,
                 self.c_tensor,
-                lambd.into().c_scalar);
+                lambd.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -14773,8 +14766,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hardtanh_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                min_val.into().c_scalar,
-                max_val.into().c_scalar);
+                min_val.c_scalar,
+                max_val.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -14786,8 +14779,8 @@ pub const Tensor = struct {
         __c.atg_hardtanh_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                min_val.into().c_scalar,
-                max_val.into().c_scalar);
+                min_val.c_scalar,
+                max_val.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -15292,7 +15285,7 @@ pub const Tensor = struct {
         __c.atg_index_fill(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
                 index_.c_tensor,
-                value.into().c_scalar);
+                value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -15304,7 +15297,7 @@ pub const Tensor = struct {
         __c.atg_index_fill_(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
                 index_.c_tensor,
-                value.into().c_scalar);
+                value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -15317,7 +15310,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 dim_,
                 index_.c_tensor,
-                value.into().c_scalar);
+                value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -15752,7 +15745,7 @@ pub const Tensor = struct {
         element: Scalar, test_elements: *const Tensor, assume_unique: bool, invert: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_isin_scalar_tensor(@ptrCast(&c_tensors), element.into().c_scalar,
+        __c.atg_isin_scalar_tensor(@ptrCast(&c_tensors), element.c_scalar,
                 test_elements.c_tensor,
                 if (assume_unique)  1  else  0,
                 if (invert)  1  else  0);
@@ -15765,7 +15758,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_isin_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
-                element.into().c_scalar,
+                element.c_scalar,
                 test_elements.c_tensor,
                 if (assume_unique)  1  else  0,
                 if (invert)  1  else  0);
@@ -15778,7 +15771,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_isin_tensor_scalar(@ptrCast(&c_tensors), elements.c_tensor,
-                test_element.into().c_scalar,
+                test_element.c_scalar,
                 if (assume_unique)  1  else  0,
                 if (invert)  1  else  0);
         torch.readAndCleanError();
@@ -15791,7 +15784,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_isin_tensor_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 elements.c_tensor,
-                test_element.into().c_scalar,
+                test_element.c_scalar,
                 if (assume_unique)  1  else  0,
                 if (invert)  1  else  0);
         torch.readAndCleanError();
@@ -16131,7 +16124,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_le(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -16141,7 +16134,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_le_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -16152,7 +16145,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_le_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -16212,7 +16205,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_leaky_relu_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                negative_slope.into().c_scalar,
+                negative_slope.c_scalar,
                 if (self_is_result)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -16225,7 +16218,7 @@ pub const Tensor = struct {
         __c.atg_leaky_relu_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                negative_slope.into().c_scalar,
+                negative_slope.c_scalar,
                 if (self_is_result)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -16247,7 +16240,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lerp(@ptrCast(&c_tensors), self.c_tensor,
                 end.c_tensor,
-                weight.into().c_scalar);
+                weight.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -16258,7 +16251,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lerp_(@ptrCast(&c_tensors), self.c_tensor,
                 end.c_tensor,
-                weight.into().c_scalar);
+                weight.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -16270,7 +16263,7 @@ pub const Tensor = struct {
         __c.atg_lerp_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 end.c_tensor,
-                weight.into().c_scalar);
+                weight.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -16314,7 +16307,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_less(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -16324,7 +16317,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_less_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -16334,7 +16327,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_less_equal(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -16344,7 +16337,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_less_equal_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -16355,7 +16348,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_less_equal_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -16397,7 +16390,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_less_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -16558,7 +16551,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_cond(@ptrCast(&c_tensors), self.c_tensor,
-                p.into().c_scalar);
+                p.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -16569,7 +16562,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_cond_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                p.into().c_scalar);
+                p.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -17171,7 +17164,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_norm(@ptrCast(&c_tensors), self.c_tensor,
-                ord.into().c_scalar,
+                ord.c_scalar,
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
@@ -17212,7 +17205,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_norm_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                ord.into().c_scalar,
+                ord.c_scalar,
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
@@ -17584,8 +17577,8 @@ pub const Tensor = struct {
         start: Scalar, end: Scalar, steps: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_linspace(@ptrCast(&c_tensors), start.into().c_scalar,
-                end.into().c_scalar,
+        __c.atg_linspace(@ptrCast(&c_tensors), start.c_scalar,
+                end.c_scalar,
                 steps,
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
@@ -17597,8 +17590,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linspace_out(@ptrCast(&c_tensors), out.c_tensor,
-                start.into().c_scalar,
-                end.into().c_scalar,
+                start.c_scalar,
+                end.c_scalar,
                 steps);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -17608,7 +17601,7 @@ pub const Tensor = struct {
         start: Scalar, end: *const Tensor, steps: i64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_linspace_scalar_tensor(@ptrCast(&c_tensors), start.into().c_scalar,
+        __c.atg_linspace_scalar_tensor(@ptrCast(&c_tensors), start.c_scalar,
                 end.c_tensor,
                 steps,
                 options_.kind.cInt(), options_.device.cInt());
@@ -17621,7 +17614,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linspace_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
-                start.into().c_scalar,
+                start.c_scalar,
                 end.c_tensor,
                 steps);
         torch.readAndCleanError();
@@ -17633,7 +17626,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linspace_tensor_scalar(@ptrCast(&c_tensors), start.c_tensor,
-                end.into().c_scalar,
+                end.c_scalar,
                 steps,
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
@@ -17646,7 +17639,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linspace_tensor_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 start.c_tensor,
-                end.into().c_scalar,
+                end.c_scalar,
                 steps);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -18138,8 +18131,8 @@ pub const Tensor = struct {
         start: Scalar, end: Scalar, steps: i64, base: f64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_logspace(@ptrCast(&c_tensors), start.into().c_scalar,
-                end.into().c_scalar,
+        __c.atg_logspace(@ptrCast(&c_tensors), start.c_scalar,
+                end.c_scalar,
                 steps,
                 base,
                 options_.kind.cInt(), options_.device.cInt());
@@ -18152,8 +18145,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logspace_out(@ptrCast(&c_tensors), out.c_tensor,
-                start.into().c_scalar,
-                end.into().c_scalar,
+                start.c_scalar,
+                end.c_scalar,
                 steps,
                 base);
         torch.readAndCleanError();
@@ -18164,7 +18157,7 @@ pub const Tensor = struct {
         start: Scalar, end: *const Tensor, steps: i64, base: f64, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_logspace_scalar_tensor(@ptrCast(&c_tensors), start.into().c_scalar,
+        __c.atg_logspace_scalar_tensor(@ptrCast(&c_tensors), start.c_scalar,
                 end.c_tensor,
                 steps,
                 base,
@@ -18178,7 +18171,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logspace_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
-                start.into().c_scalar,
+                start.c_scalar,
                 end.c_tensor,
                 steps,
                 base);
@@ -18191,7 +18184,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logspace_tensor_scalar(@ptrCast(&c_tensors), start.c_tensor,
-                end.into().c_scalar,
+                end.c_scalar,
                 steps,
                 base,
                 options_.kind.cInt(), options_.device.cInt());
@@ -18205,7 +18198,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_logspace_tensor_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 start.c_tensor,
-                end.into().c_scalar,
+                end.c_scalar,
                 steps,
                 base);
         torch.readAndCleanError();
@@ -18339,7 +18332,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lt(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -18349,7 +18342,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lt_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -18360,7 +18353,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_lt_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -18465,7 +18458,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_masked_fill(@ptrCast(&c_tensors), self.c_tensor,
                 mask.c_tensor,
-                value.into().c_scalar);
+                value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -18476,7 +18469,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_masked_fill_(@ptrCast(&c_tensors), self.c_tensor,
                 mask.c_tensor,
-                value.into().c_scalar);
+                value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -18488,7 +18481,7 @@ pub const Tensor = struct {
         __c.atg_masked_fill_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 mask.c_tensor,
-                value.into().c_scalar);
+                value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -19319,7 +19312,7 @@ pub const Tensor = struct {
         __c.atg_miopen_convolution_add_relu(@ptrCast(&c_tensors), self.c_tensor,
                 weight.c_tensor,
                 z.c_tensor,
-                alpha.into().c_scalar,
+                alpha.c_scalar,
                 if (bias != null) bias.?.c_tensor else null,
                 @constCast(stride_.ptr), @intCast(stride_.len),
                 @constCast(padding.ptr), @intCast(padding.len),
@@ -20168,7 +20161,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mul_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20178,7 +20171,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mul_scalar_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20189,7 +20182,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mul_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20201,8 +20194,8 @@ pub const Tensor = struct {
         __c.atg_multi_margin_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
                 target.c_tensor,
-                p.into().c_scalar,
-                margin.into().c_scalar,
+                p.c_scalar,
+                margin.c_scalar,
                 if (weight != null) weight.?.c_tensor else null,
                 reduction.toInt());
         torch.readAndCleanError();
@@ -20217,8 +20210,8 @@ pub const Tensor = struct {
                 grad_output.c_tensor,
                 self.c_tensor,
                 target.c_tensor,
-                p.into().c_scalar,
-                margin.into().c_scalar,
+                p.c_scalar,
+                margin.c_scalar,
                 if (weight != null) weight.?.c_tensor else null,
                 reduction.toInt());
         torch.readAndCleanError();
@@ -20334,7 +20327,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multiply_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20344,7 +20337,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multiply_scalar_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20814,7 +20807,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_native_norm_scalaropt_dim_dtype(@ptrCast(&c_tensors), self.c_tensor,
-                p.into().c_scalar,
+                p.c_scalar,
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
@@ -20828,7 +20821,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_native_norm_scalaropt_dim_dtype_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                p.into().c_scalar,
+                p.c_scalar,
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype orelse -1);
@@ -20841,7 +20834,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ne(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20851,7 +20844,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ne_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -20862,7 +20855,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ne_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -21017,7 +21010,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_new_full(@ptrCast(&c_tensors), self.c_tensor,
                 @constCast(size_.ptr), @intCast(size_.len),
-                fill_value.into().c_scalar,
+                fill_value.c_scalar,
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -21030,7 +21023,7 @@ pub const Tensor = struct {
         __c.atg_new_full_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 @constCast(size_.ptr), @intCast(size_.len),
-                fill_value.into().c_scalar);
+                fill_value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -21311,7 +21304,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_norm_dtype_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                p.into().c_scalar,
+                p.c_scalar,
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype.cInt());
@@ -21336,7 +21329,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_norm_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                p.into().c_scalar,
+                p.c_scalar,
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
@@ -21358,7 +21351,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_norm_scalaropt_dim(@ptrCast(&c_tensors), self.c_tensor,
-                p.into().c_scalar,
+                p.c_scalar,
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
@@ -21370,7 +21363,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_norm_scalaropt_dim_dtype(@ptrCast(&c_tensors), self.c_tensor,
-                p.into().c_scalar,
+                p.c_scalar,
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
                 dtype.cInt());
@@ -21383,7 +21376,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_norm_scalaropt_dtype(@ptrCast(&c_tensors), self.c_tensor,
-                p.into().c_scalar,
+                p.c_scalar,
                 dtype.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -21395,7 +21388,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_norm_scalaropt_dtype_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                p.into().c_scalar,
+                p.c_scalar,
                 dtype.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -21428,7 +21421,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_not_equal(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -21438,7 +21431,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_not_equal_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -21449,7 +21442,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_not_equal_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -21912,7 +21905,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_pow_(@ptrCast(&c_tensors), self.c_tensor,
-                exponent.into().c_scalar);
+                exponent.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -21921,7 +21914,7 @@ pub const Tensor = struct {
         self_scalar: Scalar, exponent: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_pow_scalar(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
+        __c.atg_pow_scalar(@ptrCast(&c_tensors), self_scalar.c_scalar,
                 exponent.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -21932,7 +21925,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_pow_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
-                self_scalar.into().c_scalar,
+                self_scalar.c_scalar,
                 exponent.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -21953,7 +21946,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_pow_tensor_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                exponent.into().c_scalar);
+                exponent.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -21964,7 +21957,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_pow_tensor_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                exponent.into().c_scalar);
+                exponent.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22388,10 +22381,10 @@ pub const Tensor = struct {
                 packed_hh.c_tensor,
                 col_offsets_ih.c_tensor,
                 col_offsets_hh.c_tensor,
-                scale_ih.into().c_scalar,
-                scale_hh.into().c_scalar,
-                zero_point_ih.into().c_scalar,
-                zero_point_hh.into().c_scalar);
+                scale_ih.c_scalar,
+                scale_hh.c_scalar,
+                zero_point_ih.c_scalar,
+                zero_point_hh.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22410,10 +22403,10 @@ pub const Tensor = struct {
                 packed_hh.c_tensor,
                 col_offsets_ih.c_tensor,
                 col_offsets_hh.c_tensor,
-                scale_ih.into().c_scalar,
-                scale_hh.into().c_scalar,
-                zero_point_ih.into().c_scalar,
-                zero_point_hh.into().c_scalar);
+                scale_ih.c_scalar,
+                scale_hh.c_scalar,
+                zero_point_ih.c_scalar,
+                zero_point_hh.c_scalar);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
     }
@@ -22519,10 +22512,10 @@ pub const Tensor = struct {
                 packed_hh.c_tensor,
                 col_offsets_ih.c_tensor,
                 col_offsets_hh.c_tensor,
-                scale_ih.into().c_scalar,
-                scale_hh.into().c_scalar,
-                zero_point_ih.into().c_scalar,
-                zero_point_hh.into().c_scalar);
+                scale_ih.c_scalar,
+                scale_hh.c_scalar,
+                zero_point_ih.c_scalar,
+                zero_point_hh.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22541,10 +22534,10 @@ pub const Tensor = struct {
                 packed_hh.c_tensor,
                 col_offsets_ih.c_tensor,
                 col_offsets_hh.c_tensor,
-                scale_ih.into().c_scalar,
-                scale_hh.into().c_scalar,
-                zero_point_ih.into().c_scalar,
-                zero_point_hh.into().c_scalar);
+                scale_ih.c_scalar,
+                scale_hh.c_scalar,
+                zero_point_ih.c_scalar,
+                zero_point_hh.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22862,8 +22855,8 @@ pub const Tensor = struct {
         start: Scalar, end: Scalar, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_range(@ptrCast(&c_tensors), start.into().c_scalar,
-                end.into().c_scalar,
+        __c.atg_range(@ptrCast(&c_tensors), start.c_scalar,
+                end.c_scalar,
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -22874,8 +22867,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_range_out(@ptrCast(&c_tensors), out.c_tensor,
-                start.into().c_scalar,
-                end.into().c_scalar);
+                start.c_scalar,
+                end.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22885,8 +22878,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_range_out_(@ptrCast(&c_tensors), out.c_tensor,
-                start.into().c_scalar,
-                end.into().c_scalar);
+                start.c_scalar,
+                end.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -22895,8 +22888,8 @@ pub const Tensor = struct {
         start: Scalar, end: Scalar, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_range_step(@ptrCast(&c_tensors), start.into().c_scalar,
-                end.into().c_scalar,
+        __c.atg_range_step(@ptrCast(&c_tensors), start.c_scalar,
+                end.c_scalar,
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -23131,7 +23124,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_remainder(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -23141,7 +23134,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_remainder_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -23152,7 +23145,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_remainder_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -23161,7 +23154,7 @@ pub const Tensor = struct {
         self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_remainder_scalar_tensor(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
+        __c.atg_remainder_scalar_tensor(@ptrCast(&c_tensors), self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -23172,7 +23165,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_remainder_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
-                self_scalar.into().c_scalar,
+                self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -23214,9 +23207,9 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_renorm(@ptrCast(&c_tensors), self.c_tensor,
-                p.into().c_scalar,
+                p.c_scalar,
                 dim_,
-                maxnorm.into().c_scalar);
+                maxnorm.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -23226,9 +23219,9 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_renorm_(@ptrCast(&c_tensors), self.c_tensor,
-                p.into().c_scalar,
+                p.c_scalar,
                 dim_,
-                maxnorm.into().c_scalar);
+                maxnorm.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -23239,9 +23232,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_renorm_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                p.into().c_scalar,
+                p.c_scalar,
                 dim_,
-                maxnorm.into().c_scalar);
+                maxnorm.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -23890,8 +23883,8 @@ pub const Tensor = struct {
         __c.atg_rrelu_with_noise_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
                 noise.c_tensor,
-                lower.into().c_scalar,
-                upper.into().c_scalar,
+                lower.c_scalar,
+                upper.c_scalar,
                 if (training)  1  else  0,
                 if (self_is_result)  1  else  0);
         torch.readAndCleanError();
@@ -23906,8 +23899,8 @@ pub const Tensor = struct {
                 grad_output.c_tensor,
                 self.c_tensor,
                 noise.c_tensor,
-                lower.into().c_scalar,
-                upper.into().c_scalar,
+                lower.c_scalar,
+                upper.c_scalar,
                 if (training)  1  else  0,
                 if (self_is_result)  1  else  0);
         torch.readAndCleanError();
@@ -23969,7 +23962,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rsub_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -23980,7 +23973,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_rsub_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -24000,7 +23993,7 @@ pub const Tensor = struct {
         s: Scalar, options_: TensorOptions
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_scalar_tensor(@ptrCast(&c_tensors), s.into().c_scalar,
+        __c.atg_scalar_tensor(@ptrCast(&c_tensors), s.c_scalar,
                 options_.kind.cInt(), options_.device.cInt());
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -24011,7 +24004,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_scalar_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
-                s.into().c_scalar);
+                s.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -24152,7 +24145,7 @@ pub const Tensor = struct {
         __c.atg_scatter_value(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
                 index_.c_tensor,
-                value.into().c_scalar);
+                value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -24164,7 +24157,7 @@ pub const Tensor = struct {
         __c.atg_scatter_value_(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
                 index_.c_tensor,
-                value.into().c_scalar);
+                value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -24177,7 +24170,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 dim_,
                 index_.c_tensor,
-                value.into().c_scalar);
+                value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -24189,7 +24182,7 @@ pub const Tensor = struct {
         __c.atg_scatter_value_reduce(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
                 index_.c_tensor,
-                value.into().c_scalar,
+                value.c_scalar,
                 @constCast(reduce.ptr), @intCast(reduce.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -24202,7 +24195,7 @@ pub const Tensor = struct {
         __c.atg_scatter_value_reduce_(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
                 index_.c_tensor,
-                value.into().c_scalar,
+                value.c_scalar,
                 @constCast(reduce.ptr), @intCast(reduce.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -24216,7 +24209,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 dim_,
                 index_.c_tensor,
-                value.into().c_scalar,
+                value.c_scalar,
                 @constCast(reduce.ptr), @intCast(reduce.len));
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -24241,7 +24234,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_searchsorted_scalar(@ptrCast(&c_tensors), sorted_sequence.c_tensor,
-                self_scalar.into().c_scalar,
+                self_scalar.c_scalar,
                 if (out_int32)  1  else  0,
                 if (right)  1  else  0,
                 @constCast(side.ptr), @intCast(side.len),
@@ -24256,7 +24249,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_searchsorted_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 sorted_sequence.c_tensor,
-                self_scalar.into().c_scalar,
+                self_scalar.c_scalar,
                 if (out_int32)  1  else  0,
                 if (right)  1  else  0,
                 @constCast(side.ptr), @intCast(side.len),
@@ -24291,7 +24284,7 @@ pub const Tensor = struct {
                 if (offsets != null) offsets.?.c_tensor else null,
                 axis,
                 if (unsafe)  1  else  0,
-                initial.into().c_scalar);
+                initial.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -24308,7 +24301,7 @@ pub const Tensor = struct {
                 if (offsets != null) offsets.?.c_tensor else null,
                 axis,
                 if (unsafe)  1  else  0,
-                initial.into().c_scalar);
+                initial.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25200,8 +25193,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_softplus_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                beta.into().c_scalar,
-                threshold_.into().c_scalar);
+                beta.c_scalar,
+                threshold_.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25213,8 +25206,8 @@ pub const Tensor = struct {
         __c.atg_softplus_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                beta.into().c_scalar,
-                threshold_.into().c_scalar);
+                beta.c_scalar,
+                threshold_.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25244,7 +25237,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_softshrink_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                lambd.into().c_scalar);
+                lambd.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25256,7 +25249,7 @@ pub const Tensor = struct {
         __c.atg_softshrink_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                lambd.into().c_scalar);
+                lambd.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25727,7 +25720,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_t_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25738,7 +25731,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_t_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25758,7 +25751,7 @@ pub const Tensor = struct {
         x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_special_chebyshev_polynomial_t_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
+        __c.atg_special_chebyshev_polynomial_t_x_scalar(@ptrCast(&c_tensors), x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -25769,7 +25762,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_t_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
-                x.into().c_scalar,
+                x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -25790,7 +25783,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_u_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25801,7 +25794,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_u_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25821,7 +25814,7 @@ pub const Tensor = struct {
         x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_special_chebyshev_polynomial_u_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
+        __c.atg_special_chebyshev_polynomial_u_x_scalar(@ptrCast(&c_tensors), x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -25832,7 +25825,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_u_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
-                x.into().c_scalar,
+                x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -25853,7 +25846,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_v_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25864,7 +25857,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_v_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25884,7 +25877,7 @@ pub const Tensor = struct {
         x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_special_chebyshev_polynomial_v_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
+        __c.atg_special_chebyshev_polynomial_v_x_scalar(@ptrCast(&c_tensors), x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -25895,7 +25888,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_v_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
-                x.into().c_scalar,
+                x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -25916,7 +25909,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_w_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25927,7 +25920,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_w_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -25947,7 +25940,7 @@ pub const Tensor = struct {
         x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_special_chebyshev_polynomial_w_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
+        __c.atg_special_chebyshev_polynomial_w_x_scalar(@ptrCast(&c_tensors), x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -25958,7 +25951,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_chebyshev_polynomial_w_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
-                x.into().c_scalar,
+                x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -26211,7 +26204,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_hermite_polynomial_h_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -26222,7 +26215,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_hermite_polynomial_h_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -26242,7 +26235,7 @@ pub const Tensor = struct {
         x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_special_hermite_polynomial_h_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
+        __c.atg_special_hermite_polynomial_h_x_scalar(@ptrCast(&c_tensors), x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -26253,7 +26246,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_hermite_polynomial_h_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
-                x.into().c_scalar,
+                x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -26274,7 +26267,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_hermite_polynomial_he_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -26285,7 +26278,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_hermite_polynomial_he_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -26305,7 +26298,7 @@ pub const Tensor = struct {
         x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_special_hermite_polynomial_he_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
+        __c.atg_special_hermite_polynomial_he_x_scalar(@ptrCast(&c_tensors), x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -26316,7 +26309,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_hermite_polynomial_he_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
-                x.into().c_scalar,
+                x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -26413,7 +26406,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_laguerre_polynomial_l_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -26424,7 +26417,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_laguerre_polynomial_l_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -26444,7 +26437,7 @@ pub const Tensor = struct {
         x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_special_laguerre_polynomial_l_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
+        __c.atg_special_laguerre_polynomial_l_x_scalar(@ptrCast(&c_tensors), x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -26455,7 +26448,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_laguerre_polynomial_l_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
-                x.into().c_scalar,
+                x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -26476,7 +26469,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_legendre_polynomial_p_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -26487,7 +26480,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_legendre_polynomial_p_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -26507,7 +26500,7 @@ pub const Tensor = struct {
         x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_special_legendre_polynomial_p_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
+        __c.atg_special_legendre_polynomial_p_x_scalar(@ptrCast(&c_tensors), x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -26518,7 +26511,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_legendre_polynomial_p_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
-                x.into().c_scalar,
+                x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -26866,7 +26859,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_t_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -26877,7 +26870,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_t_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -26897,7 +26890,7 @@ pub const Tensor = struct {
         x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_special_shifted_chebyshev_polynomial_t_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
+        __c.atg_special_shifted_chebyshev_polynomial_t_x_scalar(@ptrCast(&c_tensors), x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -26908,7 +26901,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_t_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
-                x.into().c_scalar,
+                x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -26929,7 +26922,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_u_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -26940,7 +26933,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_u_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -26960,7 +26953,7 @@ pub const Tensor = struct {
         x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_special_shifted_chebyshev_polynomial_u_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
+        __c.atg_special_shifted_chebyshev_polynomial_u_x_scalar(@ptrCast(&c_tensors), x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -26971,7 +26964,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_u_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
-                x.into().c_scalar,
+                x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -26992,7 +26985,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_v_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -27003,7 +26996,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_v_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -27023,7 +27016,7 @@ pub const Tensor = struct {
         x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_special_shifted_chebyshev_polynomial_v_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
+        __c.atg_special_shifted_chebyshev_polynomial_v_x_scalar(@ptrCast(&c_tensors), x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -27034,7 +27027,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_v_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
-                x.into().c_scalar,
+                x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -27055,7 +27048,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_w_n_scalar(@ptrCast(&c_tensors), x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -27066,7 +27059,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_w_n_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 x.c_tensor,
-                n.into().c_scalar);
+                n.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -27086,7 +27079,7 @@ pub const Tensor = struct {
         x: Scalar, n: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_special_shifted_chebyshev_polynomial_w_x_scalar(@ptrCast(&c_tensors), x.into().c_scalar,
+        __c.atg_special_shifted_chebyshev_polynomial_w_x_scalar(@ptrCast(&c_tensors), x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -27097,7 +27090,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_shifted_chebyshev_polynomial_w_x_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
-                x.into().c_scalar,
+                x.c_scalar,
                 n.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -27167,7 +27160,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_xlog1py_other_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -27178,7 +27171,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_xlog1py_other_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -27198,7 +27191,7 @@ pub const Tensor = struct {
         self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_special_xlog1py_self_scalar(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
+        __c.atg_special_xlog1py_self_scalar(@ptrCast(&c_tensors), self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -27209,7 +27202,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_xlog1py_self_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
-                self_scalar.into().c_scalar,
+                self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -27230,7 +27223,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_xlogy_other_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -27241,7 +27234,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_xlogy_other_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -27261,7 +27254,7 @@ pub const Tensor = struct {
         self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_special_xlogy_self_scalar(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
+        __c.atg_special_xlogy_self_scalar(@ptrCast(&c_tensors), self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -27272,7 +27265,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_xlogy_self_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
-                self_scalar.into().c_scalar,
+                self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -27293,7 +27286,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_zeta_other_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -27304,7 +27297,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_zeta_other_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -27324,7 +27317,7 @@ pub const Tensor = struct {
         self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_special_zeta_self_scalar(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
+        __c.atg_special_zeta_self_scalar(@ptrCast(&c_tensors), self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -27335,7 +27328,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_zeta_self_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
-                self_scalar.into().c_scalar,
+                self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -27683,7 +27676,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_std_correction(@ptrCast(&c_tensors), self.c_tensor,
                 @constCast(dim_.ptr), @intCast(dim_.len),
-                correction.into().c_scalar,
+                correction.c_scalar,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -27696,7 +27689,7 @@ pub const Tensor = struct {
         __c.atg_std_correction_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 @constCast(dim_.ptr), @intCast(dim_.len),
-                correction.into().c_scalar,
+                correction.c_scalar,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -27730,7 +27723,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_std_mean_correction(@ptrCast(&c_tensors), self.c_tensor,
                 @constCast(dim_.ptr), @intCast(dim_.len),
-                correction.into().c_scalar,
+                correction.c_scalar,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
@@ -27744,7 +27737,7 @@ pub const Tensor = struct {
                 out1.c_tensor,
                 self.c_tensor,
                 @constCast(dim_.ptr), @intCast(dim_.len),
-                correction.into().c_scalar,
+                correction.c_scalar,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
@@ -27845,7 +27838,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sub_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -27855,7 +27848,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sub_scalar_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -27866,7 +27859,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sub_scalar_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -27907,7 +27900,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_subtract_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -27917,7 +27910,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_subtract_scalar_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28286,8 +28279,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_threshold(@ptrCast(&c_tensors), self.c_tensor,
-                threshold_.into().c_scalar,
-                value.into().c_scalar);
+                threshold_.c_scalar,
+                value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28297,8 +28290,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_threshold_(@ptrCast(&c_tensors), self.c_tensor,
-                threshold_.into().c_scalar,
-                value.into().c_scalar);
+                threshold_.c_scalar,
+                value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28309,7 +28302,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_threshold_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
                 self.c_tensor,
-                threshold_.into().c_scalar);
+                threshold_.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28321,7 +28314,7 @@ pub const Tensor = struct {
         __c.atg_threshold_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
                 grad_output.c_tensor,
                 self.c_tensor,
-                threshold_.into().c_scalar);
+                threshold_.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28332,8 +28325,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_threshold_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                threshold_.into().c_scalar,
-                value.into().c_scalar);
+                threshold_.c_scalar,
+                value.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28892,7 +28885,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_true_divide_scalar(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -28902,7 +28895,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_true_divide_scalar_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -29838,7 +29831,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_var_correction(@ptrCast(&c_tensors), self.c_tensor,
                 @constCast(dim_.ptr), @intCast(dim_.len),
-                correction.into().c_scalar,
+                correction.c_scalar,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -29851,7 +29844,7 @@ pub const Tensor = struct {
         __c.atg_var_correction_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 @constCast(dim_.ptr), @intCast(dim_.len),
-                correction.into().c_scalar,
+                correction.c_scalar,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -29885,7 +29878,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_var_mean_correction(@ptrCast(&c_tensors), self.c_tensor,
                 @constCast(dim_.ptr), @intCast(dim_.len),
-                correction.into().c_scalar,
+                correction.c_scalar,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
@@ -29899,7 +29892,7 @@ pub const Tensor = struct {
                 out1.c_tensor,
                 self.c_tensor,
                 @constCast(dim_.ptr), @intCast(dim_.len),
-                correction.into().c_scalar,
+                correction.c_scalar,
                 if (keepdim)  1  else  0);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
@@ -30150,8 +30143,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_where_scalar(@ptrCast(&c_tensors), condition.c_tensor,
-                self_scalar.into().c_scalar,
-                other.into().c_scalar);
+                self_scalar.c_scalar,
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -30162,7 +30155,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_where_scalarother(@ptrCast(&c_tensors), condition.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -30172,7 +30165,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_where_scalarself(@ptrCast(&c_tensors), condition.c_tensor,
-                self_scalar.into().c_scalar,
+                self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -30227,7 +30220,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_xlogy_outscalar_other(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -30237,7 +30230,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_xlogy_outscalar_self(@ptrCast(&c_tensors), out.c_tensor,
-                self_scalar.into().c_scalar,
+                self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -30259,7 +30252,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_xlogy_scalar_other(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -30269,7 +30262,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_xlogy_scalar_other_(@ptrCast(&c_tensors), self.c_tensor,
-                other.into().c_scalar);
+                other.c_scalar);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
     }
@@ -30278,7 +30271,7 @@ pub const Tensor = struct {
         self_scalar: Scalar, other: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_xlogy_scalar_self(@ptrCast(&c_tensors), self_scalar.into().c_scalar,
+        __c.atg_xlogy_scalar_self(@ptrCast(&c_tensors), self_scalar.c_scalar,
                 other.c_tensor);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };

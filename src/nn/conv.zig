@@ -1,5 +1,5 @@
 const std = @import("std");
-const torch = @import("torch");
+const torch = @import("../torch.zig");
 const Tensor = torch.Tensor;
 const module = @import("module.zig");
 const nn_init = @import("init.zig");
@@ -69,14 +69,14 @@ pub fn resetND(self: anytype) void {
 
     if (self.options.transposed) {
         const weight_sizes: []i64 = [_]i64{ self.options.in_channels, @divFloor(self.options.out_channels, self.options.groups) } ++ &self.options.kernel_size;
-        self.weight = self.registerParameter("weight", Tensor.empty(weight_sizes, self.options.tensor_opts), true);
+        self.weight = self.base_module.registerParameter("weight", Tensor.empty(weight_sizes, self.options.tensor_opts), true);
     } else {
         const weight_sizes: []i64 = [_]i64{ self.options.out_channels, @divFloor(self.options.in_channels, self.options.groups) } ++ &self.options.kernel_size;
-        self.weight = self.registerParameter("weight", Tensor.empty(weight_sizes, self.options.tensor_opts), true);
+        self.weight = self.base_module.registerParameter("weight", Tensor.empty(weight_sizes, self.options.tensor_opts), true);
     }
 
     if (self.options.bias) {
-        self.bias = self.registerParameter("bias", Tensor.empty(&[_]i64{self.options.out_channels}, self.options.tensor_opts), true);
+        self.bias = self.base_module.registerParameter("bias", Tensor.empty(&[_]i64{self.options.out_channels}, self.options.tensor_opts), true);
     }
     self.resetParameters();
 }
@@ -91,34 +91,31 @@ fn resetParametersND(self: anytype) void {
 }
 
 pub const Conv1D = struct {
-    children_: std.StringArrayHashMap(*Module) = undefined,
-    parameters_: std.StringArrayHashMap(Tensor) = undefined,
-    buffers_: std.StringArrayHashMap(Tensor) = undefined,
-
+    base_module: *Module = undefined,
     bias: ?Tensor = null,
     weight: Tensor = undefined,
     options: ConvOptions(1) = undefined,
     _reversed_padding_repeated_twice: []i64 = undefined,
 
     const Self = @This();
-    const M = ModuleGen(Self);
-    pub usingnamespace M;
 
-    pub fn init(options: ConvOptions(1)) Self {
-        var self = Self{
+    pub fn init(options: ConvOptions(1)) *Self {
+        var self = torch.global_allocator.create(Self) catch unreachable;
+        self.* = Self{
             .options = options,
         };
-        self.initFields();
+        self.base_module = Module.init(self);
         self.reset();
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        self.deinitFields();
+        self.base_module.deinitFields();
         if (self.options.bias) {
             self.bias.?.free();
         }
         self.weight.free();
+        torch.global_allocator.destroy(self);
     }
 
     pub fn reset(self: *Self) void {
@@ -145,14 +142,12 @@ pub const Conv1D = struct {
     ) !void {
         _ = fmt;
         _ = options;
-        try writer.print("Conv1D(in_channels={}, out_channels={}, kernel_size={}, stride={}, padding={}, dilation={}, groups={}, bias={}, padding_mode={})", self.options.in_channels, self.options.out_channels, self.options.kernel_size, self.options.stride, self.options.padding, self.options.dilation, self.options.groups, self.options.bias, self.options.padding_mode);
+        try writer.print("Conv1D(in_channels={any}, out_channels={any}, kernel_size={any}, stride={any}, padding={any}, dilation={any}, groups={any}, bias={any}, padding_mode={any})", .{ self.options.in_channels, self.options.out_channels, self.options.kernel_size, self.options.stride, self.options.padding, self.options.dilation, self.options.groups, self.options.bias, self.options.padding_mode });
     }
 };
 
 pub const Conv2D = struct {
-    children_: std.StringArrayHashMap(*Module) = undefined,
-    parameters_: std.StringArrayHashMap(Tensor) = undefined,
-    buffers_: std.StringArrayHashMap(Tensor) = undefined,
+    base_module: *Module = undefined,
 
     bias: ?Tensor = null,
     weight: Tensor = undefined,
@@ -160,24 +155,24 @@ pub const Conv2D = struct {
 
     _reversed_padding_repeated_twice: []i64 = undefined,
     const Self = @This();
-    const M = ModuleGen(Self);
-    pub usingnamespace M;
 
-    pub fn init(options: ConvOptions(2)) Self {
-        var self = Self{
+    pub fn init(options: ConvOptions(2)) *Self {
+        var self = torch.global_allocator.create(Self) catch unreachable;
+        self.* = Self{
             .options = options,
         };
-        self.initFields();
+        self.base_module = Module.init(self);
         self.reset();
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        self.deinitFields();
+        self.base_module.deinitFields();
         if (self.options.bias) {
             self.bias.?.free();
         }
         self.weight.free();
+        torch.global_allocator.destroy(self);
     }
 
     pub fn reset(self: *Self) void {
@@ -205,14 +200,12 @@ pub const Conv2D = struct {
     ) !void {
         _ = fmt;
         _ = options;
-        try writer.print("Conv2D(in_channels={}, out_channels={}, kernel_size={}, stride={}, padding={}, dilation={}, groups={}, bias={}, padding_mode={})", self.options.in_channels, self.options.out_channels, self.options.kernel_size, self.options.stride, self.options.padding, self.options.dilation, self.options.groups, self.options.bias, self.options.padding_mode);
+        try writer.print("Conv2D(in_channels={any}, out_channels={any}, kernel_size={any}, stride={any}, padding={any}, dilation={any}, groups={any}, bias={any}, padding_mode={any})", .{ self.options.in_channels, self.options.out_channels, self.options.kernel_size, self.options.stride, self.options.padding, self.options.dilation, self.options.groups, self.options.bias, self.options.padding_mode });
     }
 };
 
 pub const Conv3D = struct {
-    children_: std.StringArrayHashMap(*Module) = undefined,
-    parameters_: std.StringArrayHashMap(Tensor) = undefined,
-    buffers_: std.StringArrayHashMap(Tensor) = undefined,
+    base_module: *Module = undefined,
 
     bias: ?Tensor = null,
     weight: Tensor = undefined,
@@ -220,24 +213,24 @@ pub const Conv3D = struct {
 
     _reversed_padding_repeated_twice: []i64 = undefined,
     const Self = @This();
-    const M = ModuleGen(Self);
-    pub usingnamespace M;
 
-    pub fn init(options: ConvOptions(3)) Self {
-        var self = Self{
+    pub fn init(options: ConvOptions(3)) *Self {
+        var self = torch.global_allocator.create(Self) catch unreachable;
+        self.* = Self{
             .options = options,
         };
-        self.initFields();
+        self.base_module = Module.init(self);
         self.reset();
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        self.deinitFields();
+        self.base_module.deinitFields();
         if (self.options.bias) {
             self.bias.?.free();
         }
         self.weight.free();
+        torch.global_allocator.destroy(self);
     }
 
     pub fn reset(self: *Self) void {
@@ -264,7 +257,7 @@ pub const Conv3D = struct {
     ) !void {
         _ = fmt;
         _ = options;
-        try writer.print("Conv3D(in_channels={}, out_channels={}, kernel_size={}, stride={}, padding={}, dilation={}, groups={}, bias={}, padding_mode={})", self.options.in_channels, self.options.out_channels, self.options.kernel_size, self.options.stride, self.options.padding, self.options.dilation, self.options.groups, self.options.bias, self.options.padding_mode);
+        try writer.print("Conv3D(in_channels={d}, out_channels={d}, kernel_size={any}, stride={any}, padding={any}, dilation={any}, groups={any}, bias={any}, padding_mode={any})", .{ self.options.in_channels, self.options.out_channels, self.options.kernel_size, self.options.stride, self.options.padding, self.options.dilation, self.options.groups, self.options.bias, self.options.padding_mode });
     }
 };
 

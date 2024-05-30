@@ -1,5 +1,5 @@
 const std = @import("std");
-const torch = @import("torch");
+const torch = @import("../torch.zig");
 const Tensor = torch.Tensor;
 const Scalar = torch.Scalar;
 const NoGradGuard = torch.NoGradGuard;
@@ -137,7 +137,7 @@ pub fn normal_(tensor: *Tensor, mean: f64, stdev: f64) Tensor {
 pub fn ones_(tensor: *Tensor) Tensor {
     var guard = NoGradGuard.init();
     defer guard.deinit();
-    return tensor.fill_(1.0);
+    return tensor.fill_(torch.Scalar.float(1.0));
 }
 
 pub fn othogonal_(tensor: *Tensor, gain: f64) Tensor {

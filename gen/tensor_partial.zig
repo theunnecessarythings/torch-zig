@@ -223,14 +223,14 @@ pub const Tensor = struct {
         torch.readAndCleanError();
     }
 
-    pub fn doubleValue(self: *const Tensor, idx: []i64) f64 {
-        const ret = __c.at_double_value_at_indexes(self.c_tensor, idx.items, idx.len);
+    pub fn doubleValue(self: *const Tensor, idx: []const i64) f64 {
+        const ret = __c.at_double_value_at_indexes(self.c_tensor, @constCast(@ptrCast(idx)), @intCast(idx.len));
         torch.readAndCleanError();
         return ret;
     }
 
-    pub fn int64Value(self: *const Tensor, idx: []i64) i64 {
-        const ret = __c.at_int64_value_at_indexes(self.c_tensor, idx.items, idx.len);
+    pub fn int64Value(self: *const Tensor, idx: []const i64) i64 {
+        const ret = __c.at_int64_value_at_indexes(self.c_tensor, @constCast(@ptrCast(idx)), @intCast(idx.len));
         torch.readAndCleanError();
         return ret;
     }

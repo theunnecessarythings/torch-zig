@@ -1,11 +1,12 @@
 const torch = @import("torch");
 const Tensor = torch.Tensor;
 const std = @import("std");
-const linear = @import("nn/linear.zig");
+const linear = torch.linear;
 const Identity = linear.Identity;
-const module = @import("nn/module.zig");
+const module = torch.module;
 const Module = module.Module;
-const conv = @import("nn/conv.zig");
+const conv = torch.conv;
+const resnet = torch.vision.resnet;
 // TODO: Memory Management - Need to find a way to free tensors efficiently
 // NOTE: Every time a tensor is created I need to have a reference to it so that I can free it,
 // so basically my own memory management system, WELL SHIT!! Zig yay
@@ -44,12 +45,12 @@ pub fn main() !void {
     const b = id.forward(&a).add(&a);
     b.print();
     std.debug.print("Identity Layer: {any}\n", .{id});
-    const n = id.name();
+    const n = id.base_module.name();
     std.debug.print("Name : {s}\n", .{n});
-    _ = id.registerParameter("test", a, false);
-    _ = id.registerParameter("bias", b, true);
+    _ = id.base_module.registerParameter("test", a, false);
+    _ = id.base_module.registerParameter("bias", b, true);
 
-    const map = id.namedParameters(true);
+    const map = id.base_module.namedParameters(true);
 
     for (map.keys()) |key| {
         std.debug.print("Key: {s}\n", .{key});
@@ -68,16 +69,21 @@ pub fn main() !void {
     defer a.free();
 
     var fc = linear.Linear.init(linear.LinearOptions{ .in_features = 2, .out_features = 3 });
-    fc.to(a.device(), a.kind(), false);
+    fc.base_module.to(a.device(), a.kind(), false);
     defer fc.deinit();
 
     fc.forward(&a).print();
 
     var conv2d = conv.Conv2D.init(.{ .in_channels = 3, .out_channels = 3, .kernel_size = [_]i64{ 3, 3 } });
-    conv2d.to(a.device(), a.kind(), false);
+    conv2d.base_module.to(a.device(), a.kind(), false);
     defer conv2d.deinit();
     const input = Tensor.rand(&[_]i64{ 1, 3, 5, 5 }, torch.FLOAT_CUDA);
     conv2d.forward(&input).print();
+
+    const x = Tensor.rand(&[_]i64{ 1, 3, 224, 224 }, torch.FLOAT_CUDA);
+    var resnet18 = resnet.resnet50(1000);
+    resnet18.base_module.to(x.device(), x.kind(), false);
+    resnet18.forward(&x).print();
 }
 
 test "leak" {

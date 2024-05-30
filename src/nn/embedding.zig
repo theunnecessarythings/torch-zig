@@ -36,20 +36,18 @@ pub const Embedding = struct {
     options: EmbeddingOptions = undefined,
 
     const Self = @This();
-    const M = ModuleGen(Self);
-    pub usingnamespace M;
 
     pub fn init(options: EmbeddingOptions) Self {
         var self = Self{
             .options = options,
         };
-        self.initFields();
+        Module.initFields(self);
         self.reset();
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        self.deinitFields();
+        Module.deinitFields(self);
         self.weight.free();
     }
 
@@ -82,13 +80,13 @@ pub const Embedding = struct {
         }
 
         if (!self.options._weight) {
-            self.weight = self.registerParameter("weight", Tensor.empty(.{ self.options.num_embeddings, self.options.embedding_dim }, self.options.tensor_opts), true);
+            self.weight = Module.registerParameter(self, "weight", Tensor.empty(.{ self.options.num_embeddings, self.options.embedding_dim }, self.options.tensor_opts), true);
             self.resetParameters();
         } else {
             const size = self.options._weight.?.size();
             std.debug.assert(size[0] == self.options.num_embeddings);
             std.debug.assert(size[1] == self.options.embedding_dim);
-            self.weight = self.registerParameter("weight", self.options._weight.?, true);
+            self.weight = Module.registerParameter(self, "weight", self.options._weight.?, true);
         }
     }
 

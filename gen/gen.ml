@@ -586,7 +586,7 @@ module Func = struct
       in
       match arg.arg_type with
       | Tensor -> Printf.sprintf "%s.c_tensor" name
-      | Scalar -> Printf.sprintf "%s.into().c_scalar" name
+      | Scalar -> Printf.sprintf "%s.c_scalar" name
       | Bool -> Printf.sprintf "if (%s)  1  else  0" name
       | ScalarType -> Printf.sprintf "%s.cInt()" name
       | ScalarTypeOption -> Printf.sprintf "%s orelse -1" name

@@ -1,5 +1,5 @@
-const torch = @import("torch");
-const Tensor = @import("torch").Tensor;
+const torch = @import("../torch.zig");
+const Tensor = torch.Tensor;
 const std = @import("std");
 const Module = @import("module.zig").Module;
 const ModuleGen = @import("module.zig").ModuleGen;
@@ -51,22 +51,21 @@ pub const BilinearOptions = struct {
 };
 
 pub const Identity = struct {
-    children_: std.StringArrayHashMap(*Module) = undefined,
-    parameters_: std.StringArrayHashMap(Tensor) = undefined,
-    buffers_: std.StringArrayHashMap(Tensor) = undefined,
+    base_module: *Module = undefined,
 
     const Self = @This();
-    const M = ModuleGen(Self);
-    pub usingnamespace M;
 
-    pub fn init() Self {
-        var self = Self{};
-        self.initFields();
+    pub fn init() *Self {
+        var self = torch.global_allocator.create(Self) catch unreachable;
+        self.* = Self{};
+        self.base_module = Module.init(self);
+        self.reset();
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        self.deinitFields();
+        self.base_module.deinit();
+        torch.global_allocator.destroy(self);
     }
 
     pub fn nameImpl(self: *const Self) []const u8 {
@@ -97,41 +96,39 @@ pub const Identity = struct {
 };
 
 pub const Linear = struct {
-    children_: std.StringArrayHashMap(*Module) = undefined,
-    parameters_: std.StringArrayHashMap(Tensor) = undefined,
-    buffers_: std.StringArrayHashMap(Tensor) = undefined,
+    base_module: *Module = undefined,
 
     bias: ?Tensor = null,
     weight: Tensor = undefined,
     options: LinearOptions = undefined,
 
     const Self = @This();
-    const M = ModuleGen(Self);
-    pub usingnamespace M;
 
-    pub fn init(options: LinearOptions) Self {
-        var self = Self{
+    pub fn init(options: LinearOptions) *Self {
+        var self = torch.global_allocator.create(Self) catch unreachable;
+        self.* = Self{
             .options = options,
         };
-        self.initFields();
+        self.base_module = Module.init(self);
         self.reset();
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        self.deinitFields();
+        self.base_module.deinit();
         if (self.options.bias) {
             self.bias.?.free();
         }
         self.weight.free();
+        torch.global_allocator.destroy(self);
     }
 
     pub fn reset(self: *Self) void {
         var size = [_]i64{ self.options.out_features, self.options.in_features };
-        self.weight = self.registerParameter("weight", Tensor.empty(&size, self.options.tensor_opts), true);
+        self.weight = self.base_module.registerParameter("weight", Tensor.empty(&size, self.options.tensor_opts), true);
         if (self.options.bias) {
             var size_ = [_]i64{self.options.out_features};
-            self.bias = self.registerParameter("bias", Tensor.empty(&size_, self.options.tensor_opts), true);
+            self.bias = self.base_module.registerParameter("bias", Tensor.empty(&size_, self.options.tensor_opts), true);
         }
         self.resetParameters();
     }
@@ -157,36 +154,33 @@ pub const Linear = struct {
     ) !void {
         _ = fmt;
         _ = options;
-        try writer.write(
+        try writer.print(
             "torch::nn::Linear(in_features={d}, out_features={d}, bias={any})",
-            self.options.in_features,
-            self.options.out_features,
-            self.options.bias,
+            .{ self.options.in_features, self.options.out_features, self.options.bias },
         );
     }
 };
 
 pub const Flatten = struct {
-    children_: std.StringArrayHashMap(*Module) = undefined,
-    parameters_: std.StringArrayHashMap(Tensor) = undefined,
-    buffers_: std.StringArrayHashMap(Tensor) = undefined,
+    base_module: *Module = undefined,
 
     options: FlattenOptions = FlattenOptions{},
 
     const Self = @This();
-    const M = ModuleGen(Self);
-    pub usingnamespace M;
 
-    pub fn init(options: FlattenOptions) Self {
-        var self = Self{
+    pub fn init(options: FlattenOptions) *Self {
+        var self = torch.global_allocator.create(Self) catch unreachable;
+        self.* = Self{
             .options = options,
         };
-        self.initFields();
+        self.base_module = Module.init(self);
+        self.reset();
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        self.deinitFields();
+        self.base_module.deinit();
+        torch.global_allocator.destroy(self);
     }
 
     pub fn reset() void {}
@@ -203,35 +197,33 @@ pub const Flatten = struct {
     ) !void {
         _ = fmt;
         _ = options;
-        try writer.write(
+        try writer.print(
             "torch::nn::Flatten(start_dim={d}, end_dim={d})",
-            self.options.start_dim,
-            self.options.end_dim,
+            .{ self.options.start_dim, self.options.end_dim },
         );
     }
 };
 
 pub const Unflatten = struct {
-    children_: std.StringArrayHashMap(*Module) = undefined,
-    parameters_: std.StringArrayHashMap(Tensor) = undefined,
-    buffers_: std.StringArrayHashMap(Tensor) = undefined,
+    base_module: *Module = undefined,
 
     options: UnflattenOptions = UnflattenOptions{},
 
     const Self = @This();
-    const M = ModuleGen(Self);
-    pub usingnamespace M;
 
-    pub fn init(options: UnflattenOptions) Self {
-        var self = Self{
+    pub fn init(options: UnflattenOptions) *Self {
+        var self = torch.global_allocator.create(Self) catch unreachable;
+        self.* = Self{
             .options = options,
         };
-        self.initFields();
+        self.base_module = Module.init(self);
+        self.reset();
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        self.deinitFields();
+        self.base_module.deinit();
+        torch.global_allocator.destroy(self);
     }
 
     pub fn reset() void {}
@@ -267,39 +259,38 @@ pub const Unflatten = struct {
 };
 
 pub const Bilinear = struct {
-    children_: std.StringArrayHashMap(*Module) = undefined,
-    parameters_: std.StringArrayHashMap(Tensor) = undefined,
-    buffers_: std.StringArrayHashMap(Tensor) = undefined,
+    base_module: *Module = undefined,
 
     bias: ?Tensor = null,
     weight: Tensor = undefined,
     options: BilinearOptions = BilinearOptions{},
     const Self = @This();
-    const M = ModuleGen(Self);
-    pub usingnamespace M;
 
-    pub fn init(options: BilinearOptions) Self {
-        var self = Self{
+    pub fn init(options: BilinearOptions) *Self {
+        var self = torch.global_allocator.create(Self) catch unreachable;
+        self.* = Self{
             .options = options,
         };
+        self.base_module = Module.init(self);
         self.reset();
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        self.deinitFields();
+        self.base_module.deinit();
         if (self.options.bias) {
             self.bias.?.free();
         }
         self.weight.free();
+        torch.global_allocator.destroy(self);
     }
 
     pub fn reset(self: *Self) void {
         var size = [_]i64{ self.options.out_features, self.options.in1_features, self.options.in2_features };
-        self.weight = self.registerParameter("weight", Tensor.empty(&size, self.options.tensor_opts));
+        self.weight = self.base_module.registerParameter("weight", Tensor.empty(&size, self.options.tensor_opts));
         if (self.options.bias) {
             size = [_]i64{self.options.out_features};
-            self.bias = self.registerParameter("bias", Tensor.empty(&size, self.options.tensor_opts));
+            self.bias = self.base_module.registerParameter("bias", Tensor.empty(&size, self.options.tensor_opts));
         }
         self.resetParameters();
     }
@@ -314,5 +305,19 @@ pub const Bilinear = struct {
 
     pub fn forward(self: *const Self, input1: *const Tensor, input2: *const Tensor) Tensor {
         return Tensor.bilinear(input1, input2, self.weight, self.bias);
+    }
+
+    pub fn format(
+        self: Self,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        try writer.print(
+            "torch::nn::Bilinear(in1_features={d}, in2_features={d}, out_features={d}, bias={any})",
+            .{ self.options.in1_features, self.options.in2_features, self.options.out_features, self.options.bias },
+        );
     }
 };

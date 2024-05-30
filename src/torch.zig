@@ -8,6 +8,13 @@ const c = @cImport({
 });
 
 pub const utils = @import("utils.zig");
+pub const linear = @import("nn/linear.zig");
+pub const conv = @import("nn/conv.zig");
+pub const norm = @import("nn/norm.zig");
+pub const module = @import("nn/module.zig");
+pub const vision = struct {
+    pub const resnet = @import("vision/resnet.zig");
+};
 // TODO: we don't have the error generating/fallible functions right now, probably need
 // // to add them for usecases where fallback is needed instead of panic
 pub const Tensor = @import("tensor.zig").Tensor;
