@@ -83,7 +83,22 @@ pub fn main() !void {
     const x = Tensor.rand(&[_]i64{ 1, 3, 224, 224 }, torch.FLOAT_CUDA);
     var resnet18 = resnet.resnet50(1000);
     resnet18.base_module.to(x.device(), x.kind(), false);
-    resnet18.forward(&x).print();
+
+    for (0..1000) |i| {
+        var nograd = torch.NoGradGuard.init();
+        defer nograd.deinit();
+        var guard = torch.MemoryGuard.init("resnet18");
+        defer guard.deinit();
+        std.debug.print("Iteration: {d}\n", .{i});
+        _ = resnet18.forward(&x);
+    }
+
+    const params = resnet18.base_module.namedParameters(true);
+    for (params.keys()) |key| {
+        std.debug.print("Key: {s}\n", .{key});
+        const sz = params.get(key).?.size();
+        std.debug.print("Size: {any}\n", .{sz});
+    }
 }
 
 test "leak" {

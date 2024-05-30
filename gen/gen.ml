@@ -1066,6 +1066,7 @@ let write_zig_wrapper funcs filename =
           "        __c.atg_%s(@ptrCast(&c_tensors), %s);"
           exported_name
           (Func.zig_binding_args func ~self);
+        pm "        torch.memory_pool.put(&c_tensors);";
         pm "        torch.readAndCleanError();";
         let returns =
           if ntensors = 1

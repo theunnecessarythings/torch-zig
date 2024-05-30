@@ -31,44 +31,51 @@ pub const INT64_CUDA = TensorOptions{ .kind = Kind.Int64, .device = .{ .Cuda = 0
 pub var global_allocator: std.mem.Allocator = std.heap.raw_c_allocator;
 
 pub var grad_enabled: bool = true;
+pub var memory_pool: TensorPool = TensorPool{};
 
 pub fn setGlobalAllocator(allocator: std.mem.Allocator) void {
     global_allocator = allocator;
 }
 
 pub const TensorPool = struct {
-    pool: std.StringArrayHashMap(std.ArrayList(Tensor)),
+    default: []const u8 = "default",
+    pool: ?std.StringArrayHashMap(std.ArrayList(c.tensor)) = null,
 
-    pub fn init() TensorPool {
-        var pool = std.StringArrayHashMap(std.ArrayList(Tensor)).init(global_allocator);
-        pool.put("default", std.ArrayList(Tensor).init(global_allocator)) catch unreachable;
-        return TensorPool{ .pool = pool };
+    fn _init(self: *TensorPool) void {
+        self.pool = std.StringArrayHashMap(std.ArrayList(c.tensor)).init(global_allocator);
+        self.pool.?.put("default", std.ArrayList(c.tensor).init(global_allocator)) catch unreachable;
     }
 
     pub fn addPool(self: *TensorPool, name: []const u8) void {
-        self.pool.put(name, std.ArrayList(Tensor).init(global_allocator)) catch unreachable;
+        if (self.pool == null) {
+            self._init();
+        }
+        self.pool.?.put(name, std.ArrayList(c.tensor).init(global_allocator)) catch unreachable;
     }
 
     pub fn removePool(self: *TensorPool, name: []const u8) void {
-        self.pool.swapRemove(name) catch {
-            @panic("Failed to remove pool");
-        };
+        _ = self.pool.?.swapRemove(name);
     }
 
     pub fn freePool(self: *TensorPool, name: []const u8) void {
-        var pool = self.pool.get(name) orelse {
+        std.log.info("Freeing pool: {s}\n", .{name});
+        var pool = self.pool.?.get(name) orelse {
             @panic("Failed to get pool");
         };
+        std.log.info("Pool size: {d}\n", .{pool.items.len});
         for (pool.items) |tensor| {
-            tensor.free();
+            c.at_free(tensor);
+            readAndCleanError();
         }
         pool.clearAndFree();
+        self.removePool(name);
     }
 
     pub fn freeAll(self: *TensorPool) void {
-        for (self.pool.values()) |pool| {
+        for (self.pool.?.values()) |pool| {
             for (pool.items) |tensor| {
-                tensor.free();
+                c.at_free(tensor);
+                readAndCleanError();
             }
             pool.clearAndFree();
         }
@@ -76,12 +83,14 @@ pub const TensorPool = struct {
 
     pub fn deinit(self: *TensorPool) void {
         self.freeAll();
-        self.pool.deinit();
+        self.pool.?.deinit();
     }
 
-    pub fn putToPool(self: *TensorPool, name: []const u8, tensor: Tensor) void {
-        var pool = self.pool.get(name) orelse {
-            // Pool does not exist, create it
+    pub fn putToPool(self: *TensorPool, name: []const u8, tensor: c.tensor) void {
+        if (self.pool == null) {
+            self._init();
+        }
+        var pool = self.pool.?.getPtr(name) orelse {
             std.log.err("Pool does not exist, creating it: {}\n", .{name});
             self.addPool(name);
         };
@@ -90,11 +99,14 @@ pub const TensorPool = struct {
         };
     }
 
-    pub fn put(self: *TensorPool, tensor: Tensor) void {
-        var pool = self.pool.get("default") orelse {
+    pub fn put(self: *TensorPool, tensor: []c.tensor) void {
+        if (self.pool == null) {
+            self._init();
+        }
+        var pool = self.pool.?.getPtr(self.default) orelse {
             @panic("Failed to get default pool");
         };
-        pool.append(tensor) catch {
+        pool.appendSlice(tensor) catch {
             @panic("Failed to append tensor to default pool");
         };
     }
@@ -634,6 +646,23 @@ pub const COptimizer = struct {
     pub fn free(self: COptimizer) void {
         c.ato_free(self.c_optimizer);
         readAndCleanError();
+    }
+};
+
+pub const MemoryGuard = struct {
+    original_state: []const u8,
+    pub fn init(pool: []const u8) MemoryGuard {
+        const self = MemoryGuard{
+            .original_state = memory_pool.default,
+        };
+        memory_pool.addPool(pool);
+        memory_pool.default = pool;
+        return self;
+    }
+
+    pub fn deinit(self: MemoryGuard) void {
+        memory_pool.freePool(memory_pool.default);
+        memory_pool.default = self.original_state;
     }
 };
 
