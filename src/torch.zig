@@ -57,6 +57,19 @@ pub const TensorPool = struct {
         _ = self.pool.?.swapRemove(name);
     }
 
+    pub fn getPoolSize(self: *TensorPool, name: []const u8) usize {
+        const pool = self.pool.?.get(name) orelse {
+            @panic("Failed to get pool");
+        };
+        var total_bytes: usize = 0;
+        for (pool.items) |tensor| {
+            var t = Tensor{ .c_tensor = tensor };
+            total_bytes += t.numel() * t.kind().eltSizeInBytes();
+            readAndCleanError();
+        }
+        return total_bytes;
+    }
+
     pub fn freePool(self: *TensorPool, name: []const u8) void {
         std.log.info("Freeing pool: {s}\n", .{name});
         var pool = self.pool.?.get(name) orelse {

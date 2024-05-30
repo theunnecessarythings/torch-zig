@@ -159,6 +159,7 @@ pub const Tensor = struct {
 
     pub fn cloneFromPtr(c_tensor: C_tensor) Tensor {
         const tensor = __c.at_shallow_clone(c_tensor);
+        torch.memory_pool.put(&.{tensor});
         torch.readAndCleanError();
         return Tensor{ .c_tensor = tensor };
     }
@@ -224,13 +225,21 @@ pub const Tensor = struct {
     }
 
     pub fn doubleValue(self: *const Tensor, idx: []const i64) f64 {
-        const ret = __c.at_double_value_at_indexes(self.c_tensor, @constCast(@ptrCast(idx)), @intCast(idx.len));
+        const ret = __c.at_double_value_at_indexes(
+            self.c_tensor,
+            @constCast(@ptrCast(idx)),
+            @intCast(idx.len),
+        );
         torch.readAndCleanError();
         return ret;
     }
 
     pub fn int64Value(self: *const Tensor, idx: []const i64) i64 {
-        const ret = __c.at_int64_value_at_indexes(self.c_tensor, @constCast(@ptrCast(idx)), @intCast(idx.len));
+        const ret = __c.at_int64_value_at_indexes(
+            self.c_tensor,
+            @constCast(@ptrCast(idx)),
+            @intCast(idx.len),
+        );
         torch.readAndCleanError();
         return ret;
     }
@@ -343,6 +352,7 @@ pub const Tensor = struct {
         var size_ = [_]i64{@intCast(data_.len)};
         const kind_ = torch.elementKind(T);
         const c_tensor = __c.at_tensor_of_data(data_.ptr, &size_, 1, kind_.eltSizeInBytes(), kind_.cInt());
+        torch.memory_pool.put(&.{c_tensor});
         torch.readAndCleanError();
         return Tensor{ .c_tensor = c_tensor };
     }
@@ -356,18 +366,21 @@ pub const Tensor = struct {
 
     pub fn shallowClone(self: *const Tensor) Tensor {
         const c_tensor = __c.at_shallow_clone(self.c_tensor);
+        var __t = [_]__c.tensor{c_tensor};
+        torch.memory_pool.put(&__t);
         torch.readAndCleanError();
         return Tensor{ .c_tensor = c_tensor };
     }
 
     pub fn get(self: *const Tensor, idx: i64) Tensor {
         const c_tensor = __c.at_get(self.c_tensor, idx);
+        torch.memory_pool.put(&.{c_tensor});
         torch.readAndCleanError();
         return Tensor{ .c_tensor = c_tensor };
     }
 
     pub fn copy(self: *const Tensor, src: *const Tensor) void {
-        _ = __c.at_copy_(self.c_tensor, src.c_tensor);
+        __c.at_copy_(self.c_tensor, src.c_tensor);
         torch.readAndCleanError();
     }
 
@@ -375,6 +388,7 @@ pub const Tensor = struct {
         const c_path = torch.global_allocator.dupeZ(path);
         defer torch.global_allocator.free(c_path);
         const c_tensor = __c.at_load(c_path);
+        torch.memory_pool.put(&.{c_tensor});
         torch.readAndCleanError();
         return Tensor{ .c_tensor = c_tensor };
     }

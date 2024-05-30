@@ -91,6 +91,8 @@ pub fn main() !void {
         defer guard.deinit();
         std.debug.print("Iteration: {d}\n", .{i});
         _ = resnet18.forward(&x);
+        std.debug.print("Default pool size: {d}\n", .{torch.memory_pool.getPoolSize("default")});
+        std.debug.print("Resnet pool size: {d}\n", .{torch.memory_pool.getPoolSize("resnet18")});
     }
 
     const params = resnet18.base_module.namedParameters(true);
