@@ -80,6 +80,7 @@ const BasicBlock = struct {
         } else {
             self.downsample = Sequential.init(options);
         }
+        self.reset();
         return self;
     }
 
@@ -158,6 +159,7 @@ pub const Bottleneck = struct {
         } else {
             self.downsample = Sequential.init(options);
         }
+        self.reset();
         return self;
     }
 
