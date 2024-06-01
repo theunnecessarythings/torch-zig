@@ -12,8 +12,11 @@ pub const linear = @import("nn/linear.zig");
 pub const conv = @import("nn/conv.zig");
 pub const norm = @import("nn/norm.zig");
 pub const module = @import("nn/module.zig");
+pub const functional = @import("nn/functional.zig");
 pub const vision = struct {
     pub const resnet = @import("vision/resnet.zig");
+    pub const alexnet = @import("vision/alexnet.zig");
+    pub const convnext = @import("vision/convnext.zig");
 };
 // TODO: we don't have the error generating/fallible functions right now, probably need
 // // to add them for usecases where fallback is needed instead of panic
@@ -71,11 +74,9 @@ pub const TensorPool = struct {
     }
 
     pub fn freePool(self: *TensorPool, name: []const u8) void {
-        std.log.info("Freeing pool: {s}\n", .{name});
         var pool = self.pool.?.get(name) orelse {
             @panic("Failed to get pool");
         };
-        std.log.info("Pool size: {d}\n", .{pool.items.len});
         for (pool.items) |tensor| {
             c.at_free(tensor);
             readAndCleanError();

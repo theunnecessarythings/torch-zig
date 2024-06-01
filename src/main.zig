@@ -7,6 +7,8 @@ const module = torch.module;
 const Module = module.Module;
 const conv = torch.conv;
 const resnet = torch.vision.resnet;
+const alexnet = torch.vision.alexnet;
+const convnext = torch.vision.convnext;
 // TODO: Memory Management - Need to find a way to free tensors efficiently
 // NOTE: Every time a tensor is created I need to have a reference to it so that I can free it,
 // so basically my own memory management system, WELL SHIT!! Zig yay
@@ -81,25 +83,31 @@ pub fn main() !void {
     conv2d.forward(&input).print();
 
     const x = Tensor.rand(&[_]i64{ 1, 3, 224, 224 }, torch.FLOAT_CUDA);
-    var resnet18 = resnet.resnet50(1000);
-    resnet18.base_module.to(x.device(), x.kind(), false);
+    // var resnet18 = resnet.resnet50(1000, torch.FLOAT_CUDA);
+    // for (0..100) |_| {
+    //     var nograd = torch.NoGradGuard.init();
+    //     defer nograd.deinit();
+    //     var guard = torch.MemoryGuard.init("resnet18");
+    //     defer guard.deinit();
+    //     _ = resnet18.forward(&x);
+    // }
+    //
+    // var _alexnet = alexnet.Alexnet.init(1000, torch.FLOAT_CUDA);
+    // for (0..100) |_| {
+    //     var nograd = torch.NoGradGuard.init();
+    //     defer nograd.deinit();
+    //     var guard = torch.MemoryGuard.init("alexnet");
+    //     defer guard.deinit();
+    //     _ = _alexnet.forward(&x);
+    // }
 
-    for (0..1000) |i| {
+    var _convnext_t = convnext.convnextLarge(1000, torch.FLOAT_CUDA);
+    for (0..100) |_| {
         var nograd = torch.NoGradGuard.init();
         defer nograd.deinit();
-        var guard = torch.MemoryGuard.init("resnet18");
+        var guard = torch.MemoryGuard.init("convnext");
         defer guard.deinit();
-        std.debug.print("Iteration: {d}\n", .{i});
-        _ = resnet18.forward(&x);
-        std.debug.print("Default pool size: {d}\n", .{torch.memory_pool.getPoolSize("default")});
-        std.debug.print("Resnet pool size: {d}\n", .{torch.memory_pool.getPoolSize("resnet18")});
-    }
-
-    const params = resnet18.base_module.namedParameters(true);
-    for (params.keys()) |key| {
-        std.debug.print("Key: {s}\n", .{key});
-        const sz = params.get(key).?.size();
-        std.debug.print("Size: {any}\n", .{sz});
+        _ = _convnext_t.forward(&x);
     }
 }
 

@@ -69,14 +69,26 @@ pub fn resetND(self: anytype) void {
 
     if (self.options.transposed) {
         const weight_sizes: []i64 = [_]i64{ self.options.in_channels, @divFloor(self.options.out_channels, self.options.groups) } ++ &self.options.kernel_size;
-        self.weight = self.base_module.registerParameter("weight", Tensor.empty(weight_sizes, self.options.tensor_opts), true);
+        self.weight = self.base_module.registerParameter(
+            "weight",
+            Tensor.empty(weight_sizes, self.options.tensor_opts),
+            true,
+        );
     } else {
         const weight_sizes: []i64 = [_]i64{ self.options.out_channels, @divFloor(self.options.in_channels, self.options.groups) } ++ &self.options.kernel_size;
-        self.weight = self.base_module.registerParameter("weight", Tensor.empty(weight_sizes, self.options.tensor_opts), true);
+        self.weight = self.base_module.registerParameter(
+            "weight",
+            Tensor.empty(weight_sizes, self.options.tensor_opts),
+            true,
+        );
     }
 
     if (self.options.bias) {
-        self.bias = self.base_module.registerParameter("bias", Tensor.empty(&[_]i64{self.options.out_channels}, self.options.tensor_opts), true);
+        self.bias = self.base_module.registerParameter(
+            "bias",
+            Tensor.empty(&[_]i64{self.options.out_channels}, self.options.tensor_opts),
+            true,
+        );
     }
     self.resetParameters();
 }

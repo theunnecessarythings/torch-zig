@@ -125,10 +125,18 @@ pub const Linear = struct {
 
     pub fn reset(self: *Self) void {
         var size = [_]i64{ self.options.out_features, self.options.in_features };
-        self.weight = self.base_module.registerParameter("weight", Tensor.empty(&size, self.options.tensor_opts), true);
+        self.weight = self.base_module.registerParameter(
+            "weight",
+            Tensor.empty(&size, self.options.tensor_opts),
+            true,
+        );
         if (self.options.bias) {
             var size_ = [_]i64{self.options.out_features};
-            self.bias = self.base_module.registerParameter("bias", Tensor.empty(&size_, self.options.tensor_opts), true);
+            self.bias = self.base_module.registerParameter(
+                "bias",
+                Tensor.empty(&size_, self.options.tensor_opts),
+                true,
+            );
         }
         self.resetParameters();
     }
@@ -287,10 +295,18 @@ pub const Bilinear = struct {
 
     pub fn reset(self: *Self) void {
         var size = [_]i64{ self.options.out_features, self.options.in1_features, self.options.in2_features };
-        self.weight = self.base_module.registerParameter("weight", Tensor.empty(&size, self.options.tensor_opts));
+        self.weight = self.base_module.registerParameter(
+            "weight",
+            Tensor.empty(&size, self.options.tensor_opts),
+            true,
+        );
         if (self.options.bias) {
             size = [_]i64{self.options.out_features};
-            self.bias = self.base_module.registerParameter("bias", Tensor.empty(&size, self.options.tensor_opts));
+            self.bias = self.base_module.registerParameter(
+                "bias",
+                Tensor.empty(&size, self.options.tensor_opts),
+                true,
+            );
         }
         self.resetParameters();
     }

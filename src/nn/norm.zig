@@ -25,7 +25,7 @@ pub const InstanceNormOptions = struct {
 };
 
 pub const LayerNormOptions = struct {
-    normalized_shape: []i64,
+    normalized_shape: []const i64,
     eps: f64 = 1e-5,
     elementwise_affine: bool = true,
     tensor_opts: torch.TensorOptions = torch.FLOAT_CPU,
@@ -41,20 +41,54 @@ pub const GroupNormOptions = struct {
 
 fn resetImpl(self: anytype) void {
     if (self.options.affine) {
-        self.weight = self.base_module.registerParameter("weight", Tensor.empty(&[_]i64{self.options.num_features}, self.options.tensor_opts), true);
-        self.bias = self.base_module.registerParameter("bias", Tensor.empty(&[_]i64{self.options.num_features}, self.options.tensor_opts), true);
+        self.weight = self.base_module.registerParameter(
+            "weight",
+            Tensor.empty(&[_]i64{self.options.num_features}, self.options.tensor_opts),
+            true,
+        );
+        self.bias = self.base_module.registerParameter(
+            "bias",
+            Tensor.empty(&[_]i64{self.options.num_features}, self.options.tensor_opts),
+            true,
+        );
     } else {
-        self.weight = self.base_module.registerParameter("weight", Tensor.empty(&[_]i64{}, self.options.tensor_opts), false);
-        self.bias = self.base_module.registerParameter("bias", Tensor.empty(&[_]i64{}, self.options.tensor_opts), false);
+        self.weight = self.base_module.registerParameter(
+            "weight",
+            Tensor.empty(&[_]i64{}, self.options.tensor_opts),
+            false,
+        );
+        self.bias = self.base_module.registerParameter(
+            "bias",
+            Tensor.empty(&[_]i64{}, self.options.tensor_opts),
+            false,
+        );
     }
     if (self.options.track_running_stats) {
-        self.running_mean = self.base_module.registerBuffer("running_mean", Tensor.zeros(&[_]i64{self.options.num_features}, self.options.tensor_opts));
-        self.running_var = self.base_module.registerBuffer("running_var", Tensor.ones(&[_]i64{self.options.num_features}, self.options.tensor_opts));
-        self.num_batches_tracked = self.base_module.registerBuffer("num_batches_tracked", Tensor.ones(&.{1}, self.options.tensor_opts.dtype(.Int)));
+        self.running_mean = self.base_module.registerBuffer(
+            "running_mean",
+            Tensor.zeros(&[_]i64{self.options.num_features}, self.options.tensor_opts),
+        );
+        self.running_var = self.base_module.registerBuffer(
+            "running_var",
+            Tensor.ones(&[_]i64{self.options.num_features}, self.options.tensor_opts),
+        );
+        self.num_batches_tracked = self.base_module.registerBuffer(
+            "num_batches_tracked",
+            Tensor.ones(&.{1}, self.options.tensor_opts.dtype(.Int)),
+        );
     } else {
-        self.running_mean = self.base_module.registerBuffer("running_mean", Tensor.empty(&[_]i64{}, self.options.tensor_opts));
-        self.running_var = self.base_module.registerBuffer("running_var", Tensor.empty(&[_]i64{}, self.options.tensor_opts));
-        self.num_batches_tracked = self.base_module.registerBuffer("num_batches_tracked", Tensor.empty(&[_]i64{}, self.options.tensor_opts));
+        self.running_mean = self.base_module.registerBuffer(
+            "running_mean",
+            Tensor.empty(&[_]i64{}, self.options.tensor_opts),
+        );
+        self.running_var = self.base_module.registerBuffer(
+            "running_var",
+            Tensor.empty(&[_]i64{}, self.options.tensor_opts),
+        );
+        self.num_batches_tracked = self.base_module.registerBuffer(
+            "num_batches_tracked",
+            Tensor.empty(&[_]i64{}, self.options.tensor_opts),
+        );
     }
     self.resetParameters();
 }
@@ -279,24 +313,40 @@ pub const LayerNorm = struct {
 
     pub fn reset(self: *Self) void {
         if (self.options.elementwise_affine) {
-            self.weight = self.base_module.registerParameter("weight", Tensor.empty(&self.options.normalized_shape, self.options.tensor_opts), true);
-            self.bias = self.base_module.registerParameter("bias", Tensor.empty(&self.options.normalized_shape, self.options.tensor_opts), true);
+            self.weight = self.base_module.registerParameter(
+                "weight",
+                Tensor.empty(self.options.normalized_shape, self.options.tensor_opts),
+                true,
+            );
+            self.bias = self.base_module.registerParameter(
+                "bias",
+                Tensor.empty(self.options.normalized_shape, self.options.tensor_opts),
+                true,
+            );
         } else {
-            self.weight = self.base_module.registerParameter("weight", Tensor.empty(&[_]i64{}, self.options.tensor_opts), false);
-            self.bias = self.base_module.registerParameter("bias", Tensor.empty(&[_]i64{}, self.options.tensor_opts), false);
+            self.weight = self.base_module.registerParameter(
+                "weight",
+                Tensor.empty(&[_]i64{}, self.options.tensor_opts),
+                false,
+            );
+            self.bias = self.base_module.registerParameter(
+                "bias",
+                Tensor.empty(&[_]i64{}, self.options.tensor_opts),
+                false,
+            );
         }
         self.resetParameters();
     }
 
     pub fn resetParameters(self: *Self) void {
         if (self.options.elementwise_affine) {
-            self.weight = nn_init.ones_(self.weight);
-            self.bias = nn_init.zeros_(self.bias);
+            self.weight = nn_init.ones_(&self.weight);
+            self.bias = nn_init.zeros_(&self.bias);
         }
     }
 
     pub fn forward(self: *const Self, input: *const Tensor) Tensor {
-        return Tensor.layerNorm(input, self.options.normalized_shape, self.weight, self.bias, self.options.eps, true);
+        return Tensor.layerNorm(input, self.options.normalized_shape, &self.weight, &self.bias, self.options.eps, true);
     }
 
     pub fn format(
@@ -343,11 +393,27 @@ pub const GroupNorm = struct {
 
     pub fn reset(self: *Self) void {
         if (self.options.affine) {
-            self.weight = self.base_module.registerParameter("weight", Tensor.empty(&[_]i64{self.options.num_channels}, self.options.tensor_opts), true);
-            self.bias = self.base_module.registerParameter("bias", Tensor.empty(&[_]i64{self.options.num_channels}, self.options.tensor_opts), true);
+            self.weight = self.base_module.registerParameter(
+                "weight",
+                Tensor.empty(&[_]i64{self.options.num_channels}, self.options.tensor_opts),
+                true,
+            );
+            self.bias = self.base_module.registerParameter(
+                "bias",
+                Tensor.empty(&[_]i64{self.options.num_channels}, self.options.tensor_opts),
+                true,
+            );
         } else {
-            self.weight = self.base_module.registerParameter("weight", Tensor.empty(&[_]i64{}, self.options.tensor_opts), false);
-            self.bias = self.base_module.registerParameter("bias", Tensor.empty(&[_]i64{}, self.options.tensor_opts), false);
+            self.weight = self.base_module.registerParameter(
+                "weight",
+                Tensor.empty(&[_]i64{}, self.options.tensor_opts),
+                false,
+            );
+            self.bias = self.base_module.registerParameter(
+                "bias",
+                Tensor.empty(&[_]i64{}, self.options.tensor_opts),
+                false,
+            );
         }
         self.resetParameters();
     }
