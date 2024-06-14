@@ -33,7 +33,7 @@ pub const Module = struct {
         return self.forwardFn(self.ptr, input);
     }
 
-    pub fn initFields(self: *Module) void {
+    fn initFields(self: *Module) void {
         self.children_ = std.StringArrayHashMap(*Module).init(torch.global_allocator);
         self.parameters_ = std.StringArrayHashMap(Tensor).init(torch.global_allocator);
         self.buffers_ = std.StringArrayHashMap(Tensor).init(torch.global_allocator);
@@ -44,7 +44,7 @@ pub const Module = struct {
         torch.global_allocator.destroy(self);
     }
 
-    pub fn deinitFields(self: *Module) void {
+    fn deinitFields(self: *Module) void {
         self.children_.deinit();
         self.parameters_.deinit();
         self.buffers_.deinit();
@@ -85,6 +85,16 @@ pub const Module = struct {
         }
     }
 
+    pub fn namedBuffersApply(comptime T: type, ptr: *anyopaque, prefix: []const u8, result: *anyopaque) void {
+        var result_: *std.StringArrayHashMap(Tensor) = @ptrCast(@alignCast(result));
+        var self: T = @ptrCast(@alignCast(ptr));
+        for (self.buffers_.keys()) |key| {
+            const value = self.buffers_.get(key).?;
+            const full_key = std.fmt.allocPrint(torch.global_allocator, "{s}{s}", .{ prefix, key }) catch unreachable;
+            result_.put(full_key, value) catch unreachable;
+        }
+    }
+
     pub fn namedParameters(self: *Module, recurse: bool) std.StringArrayHashMap(Tensor) {
         var result = std.StringArrayHashMap(Tensor).init(torch.global_allocator);
         if (!recurse) {
@@ -101,13 +111,25 @@ pub const Module = struct {
         return result;
     }
 
-    // pub fn buffers(self: *const T,recurse: bool) std.ArrayList(Tensor) {
-    //
-    // }
-    //
-    // pub fn namedBuffers(self: *const T, recurse: bool) std.ArrayList(([]const u8, Tensor)) {
-    //
-    // }
+    pub fn buffers(self: *Module, recurse: bool) std.ArrayList(Tensor) {
+        return self.namedBuffers(recurse).values();
+    }
+
+    pub fn namedBuffers(self: *Module, recurse: bool) std.StringArrayHashMap(Tensor) {
+        var result = std.StringArrayHashMap(Tensor).init(torch.global_allocator);
+        if (!recurse) {
+            for (self.buffers_.keys()) |key| {
+                const value = self.buffers_.get(key).?;
+                if (value.defined()) {
+                    result.put(key, value) catch unreachable;
+                }
+            }
+        } else {
+            @setEvalBranchQuota(2000);
+            self.apply("", &result, namedBuffersApply);
+        }
+        return result;
+    }
     //
     // pub fn modules(self: *const T, include_self: bool) std.ArrayList(T) {
     //
@@ -202,9 +224,12 @@ pub const Module = struct {
         return tensor;
     }
 
-    pub fn registerModule(self: *Module, name_: []const u8, module: *Module) *Module {
-        _ = self.children_.put(name_, module) catch unreachable;
-        return module;
+    pub fn registerModule(self: *Module, name_: []const u8, module: anytype) *Module {
+        if (!@hasField(@TypeOf(module.*), "base_module")) {
+            @compileError("The module must have a `base_module` field.");
+        }
+        _ = self.children_.put(name_, module.base_module) catch unreachable;
+        return module.base_module;
     }
 };
 
@@ -227,9 +252,21 @@ pub const Sequential = struct {
         return self;
     }
 
-    pub fn add(self: *Self, module: *Module) *Self {
+    pub fn add(self: *Self, module: anytype) *Self {
+        if (!@hasField(@TypeOf(module.*), "base_module")) {
+            @compileError("The module must have a `base_module` field.");
+        }
         const name = std.fmt.allocPrint(torch.global_allocator, "{d}", .{self.modules.items.len}) catch unreachable;
-        self.modules.append(module) catch unreachable;
+        self.modules.append(module.base_module) catch unreachable;
+        _ = self.base_module.registerModule(name, module);
+        return self;
+    }
+
+    pub fn addWithName(self: *Self, name: []const u8, module: anytype) *Self {
+        if (!@hasField(@TypeOf(module.*), "base_module")) {
+            @compileError("The module must have a `base_module` field.");
+        }
+        self.modules.append(module.base_module) catch unreachable;
         _ = self.base_module.registerModule(name, module);
         return self;
     }

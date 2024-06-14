@@ -15,15 +15,6 @@ const BatchNorm2D = torch.norm.BatchNorm(2);
 const Sequential = module.Sequential;
 const LayerNorm = torch.norm.LayerNorm;
 
-fn layernorm2d(normalized_shape: []const i64, options: TensorOptions) *Sequential {
-    const norm_shape = torch.global_allocator.dupe(i64, normalized_shape) catch unreachable;
-    const seq = Sequential.init(options)
-        .add(Functional(Tensor.permute, .{&.{ 0, 2, 3, 1 }}).init().base_module)
-        .add(LayerNorm.init(.{ .normalized_shape = norm_shape, .tensor_opts = options }).base_module)
-        .add(Functional(Tensor.permute, .{&.{ 0, 3, 1, 2 }}).init().base_module);
-    return seq;
-}
-
 const StochasticDepthKind = enum {
     Row,
     Batch,
@@ -107,21 +98,20 @@ pub const CNBlock = struct {
                 .groups = dim,
                 .tensor_opts = options,
             },
-        ).base_module)
-            .add(Functional(Tensor.permute, .{&.{ 0, 2, 3, 1 }}).init().base_module)
-            .add(LayerNorm.init(.{ .normalized_shape = norm_shape, .tensor_opts = options }).base_module)
-            .add(Linear.init(.{ .in_features = dim, .out_features = 4 * dim, .tensor_opts = options }).base_module)
-            .add(Functional(Tensor.gelu, .{"none"}).init().base_module)
-            .add(Linear.init(.{ .in_features = 4 * dim, .out_features = dim, .tensor_opts = options }).base_module)
-            .add(Functional(Tensor.permute, .{&.{ 0, 3, 1, 2 }}).init().base_module);
+        ))
+            .add(Functional(Tensor.permute, .{&.{ 0, 2, 3, 1 }}).init())
+            .add(LayerNorm.init(.{ .normalized_shape = norm_shape, .tensor_opts = options }))
+            .add(Linear.init(.{ .in_features = dim, .out_features = 4 * dim, .tensor_opts = options }))
+            .add(Functional(Tensor.gelu, .{"none"}).init())
+            .add(Linear.init(.{ .in_features = 4 * dim, .out_features = dim, .tensor_opts = options }))
+            .add(Functional(Tensor.permute, .{&.{ 0, 3, 1, 2 }}).init());
         self.reset();
         return self;
     }
 
     pub fn reset(self: *Self) void {
-        _ = self.base_module.registerModule("stoch_depth", self.stoch_depth.base_module);
-        _ = self.base_module.registerModule("block", self.block.base_module);
-        self.block.reset();
+        _ = self.base_module.registerModule("stoch_depth", self.stoch_depth);
+        _ = self.base_module.registerModule("block", self.block);
     }
 
     pub fn deinit(self: *Self) void {
@@ -141,18 +131,20 @@ pub const CNBlock = struct {
 };
 
 fn convNorm(c_in: i64, c_out: i64, ksize: i64, stride: i64, padding: i64, options: TensorOptions) *Sequential {
+    const norm_shape = torch.global_allocator.dupe(i64, &.{c_out}) catch unreachable;
     const seq = Sequential.init(options)
-        .add(Conv2D.init(
-        .{
-            .in_channels = c_in,
-            .out_channels = c_out,
-            .kernel_size = .{ ksize, ksize },
-            .stride = .{ stride, stride },
-            .padding = .{ .Padding = .{ padding, padding } },
-            .tensor_opts = options,
-        },
-    ).base_module)
-        .add(layernorm2d(&.{c_out}, options).base_module);
+        .add(Conv2D.init(.{
+        .in_channels = c_in,
+        .out_channels = c_out,
+        .kernel_size = .{ ksize, ksize },
+        .stride = .{ stride, stride },
+        .padding = .{ .Padding = .{ padding, padding } },
+        .tensor_opts = options,
+    }))
+        .add(Functional(Tensor.permute, .{&.{ 0, 2, 3, 1 }}).init())
+        .addWithName("1", LayerNorm.init(.{ .normalized_shape = norm_shape, .tensor_opts = options }))
+        .add(Functional(Tensor.permute, .{&.{ 0, 3, 1, 2 }}).init());
+
     return seq;
 }
 
@@ -173,7 +165,7 @@ pub const ConvNext = struct {
         self.features = Sequential.init(options);
 
         const firstconv_c_out = block_setting[0][0];
-        self.features = self.features.add(convNorm(3, firstconv_c_out, 4, 4, 0, options).base_module);
+        self.features = self.features.add(convNorm(3, firstconv_c_out, 4, 4, 0, options));
         var total_stage_blocks: i64 = 0;
         for (block_setting) |block| {
             total_stage_blocks += block[2];
@@ -185,41 +177,44 @@ pub const ConvNext = struct {
             var stage = Sequential.init(options);
             for (0..@intCast(num_layers)) |_| {
                 const sd_prob = stochastic_depth_prob * @as(f64, @floatFromInt(stage_block_idx)) / @as(f64, @floatFromInt(total_stage_blocks - 1));
-                stage = stage.add(CNBlock.init(c_in, layer_scale, sd_prob, options).base_module);
+                stage = stage.add(CNBlock.init(c_in, layer_scale, sd_prob, options));
                 stage_block_idx += 1;
             }
-            self.features = self.features.add(stage.base_module);
+            self.features = self.features.add(stage);
             if (c_out != -1) {
+                const norm_shape = torch.global_allocator.dupe(i64, &.{c_in}) catch unreachable;
                 self.features = self.features.add(
                     Sequential.init(options)
-                        .add(layernorm2d(&.{c_in}, options).base_module)
-                        .add(Conv2D.init(.{
+                        .add(Functional(Tensor.permute, .{&.{ 0, 2, 3, 1 }}).init())
+                        .addWithName("0", LayerNorm.init(.{ .normalized_shape = norm_shape, .tensor_opts = options }))
+                        .add(Functional(Tensor.permute, .{&.{ 0, 3, 1, 2 }}).init())
+                        .addWithName("1", Conv2D.init(.{
                         .in_channels = c_in,
                         .out_channels = c_out,
                         .kernel_size = .{ 2, 2 },
                         .stride = .{ 2, 2 },
                         .tensor_opts = options,
-                    }).base_module).base_module,
+                    })),
                 );
             }
         }
         const lastblock = block_setting[block_setting.len - 1];
         const lastconv_c_out = if (lastblock[1] != -1) lastblock[1] else lastblock[0];
-
+        const norm_shape = torch.global_allocator.dupe(i64, &.{lastconv_c_out}) catch unreachable;
         self.classifier = Sequential.init(options)
-            .add(layernorm2d(&.{lastconv_c_out}, options).base_module)
-            .add(Functional(Tensor.flatten, .{ 1, -1 }).init().base_module)
-            .add(Linear.init(.{ .in_features = lastconv_c_out, .out_features = num_classes, .tensor_opts = options }).base_module);
+            .add(Functional(Tensor.permute, .{&.{ 0, 2, 3, 1 }}).init())
+            .addWithName("0", LayerNorm.init(.{ .normalized_shape = norm_shape, .tensor_opts = options }))
+            .add(Functional(Tensor.permute, .{&.{ 0, 3, 1, 2 }}).init())
+            .add(Functional(Tensor.flatten, .{ 1, -1 }).init())
+            .addWithName("2", Linear.init(.{ .in_features = lastconv_c_out, .out_features = num_classes, .tensor_opts = options }));
 
         self.reset();
         return self;
     }
 
     pub fn reset(self: *Self) void {
-        _ = self.base_module.registerModule("features", self.features.base_module);
-        _ = self.base_module.registerModule("classifier", self.classifier.base_module);
-        self.features.reset();
-        self.classifier.reset();
+        _ = self.base_module.registerModule("features", self.features);
+        _ = self.base_module.registerModule("classifier", self.classifier);
     }
 
     pub fn deinit(self: *Self) void {

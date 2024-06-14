@@ -122,7 +122,7 @@ pub const Conv1D = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.base_module.deinitFields();
+        self.base_module.deinit();
         if (self.options.bias) {
             self.bias.?.free();
         }
@@ -179,7 +179,7 @@ pub const Conv2D = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.base_module.deinitFields();
+        self.base_module.deinit();
         if (self.options.bias) {
             self.bias.?.free();
         }
@@ -237,7 +237,7 @@ pub const Conv3D = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.base_module.deinitFields();
+        self.base_module.deinit();
         if (self.options.bias) {
             self.bias.?.free();
         }

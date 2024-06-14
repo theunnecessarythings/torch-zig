@@ -589,21 +589,24 @@ module Func = struct
       | Scalar -> Printf.sprintf "%s.c_scalar" name
       | Bool -> Printf.sprintf "if (%s)  1  else  0" name
       | ScalarType -> Printf.sprintf "%s.cInt()" name
-      | ScalarTypeOption -> Printf.sprintf "%s orelse -1" name
+      | ScalarTypeOption -> Printf.sprintf "if (%s) |__k| __k.cInt() else -1" name
       | Device -> Printf.sprintf "%s.cInt()" name
       | TensorOptions -> Printf.sprintf "%s.kind.cInt(), %s.device.cInt()" name name
       | Int64Option -> Printf.sprintf "%s orelse 0, @intFromBool(%s == null)" name name
       | DoubleOption ->
         Printf.sprintf "%s orelse std.math.nan(f64), @intFromBool(%s == null)" name name
       | String -> Printf.sprintf "@constCast(%s.ptr), @intCast(%s.len)" name name
-      | IntList | IntListOption | DoubleList ->
+      | IntList | DoubleList ->
         Printf.sprintf "@constCast(%s.ptr), @intCast(%s.len)" name name
-      | TensorOptList -> Printf.sprintf "ptrListOpt(%s).ptr, @intCast(%s.len)" name name
-      | TensorList -> Printf.sprintf "ptrList(%s).ptr, @intCast(%s.len)" name name
+      | IntListOption ->
+        Printf.sprintf "@constCast(%s.?.ptr), @intCast(%s.?.len)" name name
+      | TensorOptList ->
+        Printf.sprintf "@ptrCast(ptrListOpt(%s)), @intCast(%s.len)" name name
+      | TensorList -> Printf.sprintf "@ptrCast(ptrList(%s)), @intCast(%s.len)" name name
       | TensorOption -> Printf.sprintf "if (%s != null) %s.?.c_tensor else null" name name
       | Int64 when String.( = ) name "reduction" -> "reduction.toInt()"
       | Layout -> Printf.sprintf "%s.toI8()" name
-      | LayoutOption -> Printf.sprintf "%s orelse - 1" name
+      | LayoutOption -> Printf.sprintf "%s orelse -1" name
       | _ -> name)
     |> String.concat ~sep:",\n                "
 
@@ -1050,10 +1053,10 @@ let write_zig_wrapper funcs filename =
         pm "        while (true) {";
         pm "            const c__ = c_tensors[idx];";
         pm "            if (c__ == null) break;";
-        pm "            r__.append(Tensor{ .c_tensor = c__ });";
+        pm "            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;";
         pm "            idx += 1;";
         pm "        }";
-        pm "        return r__;";
+        pm "        return r__.toOwnedSlice() catch unreachable;";
         pm "    }"
       | `nothing ->
         pm "        __c.atg_%s(%s);" exported_name (Func.zig_binding_args func ~self);

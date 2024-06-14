@@ -74,7 +74,8 @@ fn resetImpl(self: anytype) void {
         );
         self.num_batches_tracked = self.base_module.registerBuffer(
             "num_batches_tracked",
-            Tensor.ones(&.{1}, self.options.tensor_opts.dtype(.Int)),
+            // Tensor.ones(&.{1}, self.options.tensor_opts.dtype(.Int)),
+            Tensor.fromLong(1),
         );
     } else {
         self.running_mean = self.base_module.registerBuffer(

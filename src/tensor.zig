@@ -29,12 +29,12 @@ pub const Reduction = enum {
     }
 };
 
-fn ptrList(l: []?Tensor) []*C_tensor {
-    var ret = std.ArrayList(*C_tensor).init(torch.global_allocator);
+fn ptrList(l: []*const Tensor) []C_tensor {
+    var ret = std.ArrayList(C_tensor).init(torch.global_allocator);
     for (l) |x| {
-        ret.append(x.c_tensor);
+        ret.append(x.c_tensor) catch unreachable;
     }
-    return ret.toOwnedSlice();
+    return ret.toOwnedSlice() catch unreachable;
 }
 fn ptrListOpt(l: []Tensor) []*C_tensor {
     return ptrList(l);
@@ -157,6 +157,20 @@ pub const Tensor = struct {
         return Tensor{ .c_tensor = c_tensor };
     }
 
+    pub fn fromLong(v: i64) Tensor {
+        var c_tensor = [1]C_tensor{__c.at_new_long(v)};
+        torch.memory_pool.put(&c_tensor);
+        torch.readAndCleanError();
+        return Tensor{ .c_tensor = c_tensor[0] };
+    }
+
+    pub fn fromFloat(v: f64) Tensor {
+        var c_tensor = [1]C_tensor{__c.at_new_double(v)};
+        torch.memory_pool.put(&c_tensor);
+        torch.readAndCleanError();
+        return Tensor{ .c_tensor = c_tensor[0] };
+    }
+
     pub fn cloneFromPtr(c_tensor: C_tensor) Tensor {
         const tensor = __c.at_shallow_clone(c_tensor);
         torch.memory_pool.put(&.{tensor});
@@ -179,7 +193,7 @@ pub const Tensor = struct {
         var buffer: [10]i64 = undefined;
         __c.at_shape(self.c_tensor, buffer[0..dim_].ptr);
         torch.readAndCleanError();
-        return buffer[0..dim_];
+        return torch.global_allocator.dupe(i64, buffer[0..dim_]) catch unreachable;
     }
 
     pub fn sizeDims(self: *const Tensor, comptime dims: usize) [dims]i64 {
@@ -187,7 +201,7 @@ pub const Tensor = struct {
         if (size_.len != dims) {
             @panic("expected one dim");
         }
-        return size_[0..dims];
+        return size_[0..dims].*;
     }
 
     pub fn stride(self: *const Tensor) ![]i64 {
@@ -982,9 +996,9 @@ pub const Tensor = struct {
         a: *const Tensor, size_: ?[]i64, stride_: ?[]i64, dtype: ?Kind
     ) void {
         __c.atg__assert_tensor_metadata(a.c_tensor,
-                @constCast(size_.ptr), @intCast(size_.len),
-                @constCast(stride_.ptr), @intCast(stride_.len),
-                dtype orelse -1);
+                @constCast(size_.?.ptr), @intCast(size_.?.len),
+                @constCast(stride_.?.ptr), @intCast(stride_.?.len),
+                if (dtype) |__k| __k.cInt() else -1);
         torch.readAndCleanError();
         return;
     }
@@ -1161,7 +1175,7 @@ pub const Tensor = struct {
         tensors: []*const Tensor, dim_: i64, num_chunks: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg__chunk_cat(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len),
+        __c.atg__chunk_cat(@ptrCast(&c_tensors), @ptrCast(ptrList(tensors)), @intCast(tensors.len),
                 dim_,
                 num_chunks);
         torch.memory_pool.put(&c_tensors);
@@ -1174,7 +1188,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__chunk_cat_out(@ptrCast(&c_tensors), out.c_tensor,
-                ptrList(tensors).ptr, @intCast(tensors.len),
+                @ptrCast(ptrList(tensors)), @intCast(tensors.len),
                 dim_,
                 num_chunks);
         torch.memory_pool.put(&c_tensors);
@@ -1556,7 +1570,7 @@ pub const Tensor = struct {
                 dense_b.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
                 if (alpha != null) alpha.?.c_tensor else null,
-                out_dtype orelse -1,
+                if (out_dtype) |__k| __k.cInt() else -1,
                 if (transpose_result)  1  else  0,
                 alg_id);
         torch.memory_pool.put(&c_tensors);
@@ -1571,7 +1585,7 @@ pub const Tensor = struct {
                 dense_b.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
                 if (alpha != null) alpha.?.c_tensor else null,
-                out_dtype orelse -1,
+                if (out_dtype) |__k| __k.cInt() else -1,
                 if (transpose_result)  1  else  0);
        torch.readAndCleanError();
         return return_;
@@ -1777,7 +1791,7 @@ pub const Tensor = struct {
     ) [5]Tensor {
         var c_tensors = [_]C_tensor{null} ** 5;
         __c.atg__cudnn_rnn(@ptrCast(&c_tensors), self.c_tensor,
-                ptrList(weight).ptr, @intCast(weight.len),
+                @ptrCast(ptrList(weight)), @intCast(weight.len),
                 weight_stride0,
                 if (weight_buf != null) weight_buf.?.c_tensor else null,
                 hx.c_tensor,
@@ -1801,7 +1815,7 @@ pub const Tensor = struct {
         weight_arr: []*const Tensor, weight_stride0: i64, input_size: i64, mode_: i64, hidden_size: i64, proj_size: i64, num_layers: i64, batch_first: bool, bidirectional: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg__cudnn_rnn_flatten_weight(@ptrCast(&c_tensors), ptrList(weight_arr).ptr, @intCast(weight_arr.len),
+        __c.atg__cudnn_rnn_flatten_weight(@ptrCast(&c_tensors), @ptrCast(ptrList(weight_arr)), @intCast(weight_arr.len),
                 weight_stride0,
                 input_size,
                 mode_,
@@ -1820,7 +1834,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__cudnn_rnn_flatten_weight_out(@ptrCast(&c_tensors), out.c_tensor,
-                ptrList(weight_arr).ptr, @intCast(weight_arr.len),
+                @ptrCast(ptrList(weight_arr)), @intCast(weight_arr.len),
                 weight_stride0,
                 input_size,
                 mode_,
@@ -1844,7 +1858,7 @@ pub const Tensor = struct {
                 out3.c_tensor,
                 out4.c_tensor,
                 self.c_tensor,
-                ptrList(weight).ptr, @intCast(weight.len),
+                @ptrCast(ptrList(weight)), @intCast(weight.len),
                 weight_stride0,
                 if (weight_buf != null) weight_buf.?.c_tensor else null,
                 hx.c_tensor,
@@ -2794,16 +2808,16 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn internalHistogramddBinEdgesOut(
         self: *const Tensor, out: []*const Tensor, bins: []const i64, range_: []f64, weight: ?*const Tensor, density: bool
     ) void {
-        __c.atg__histogramdd_bin_edges_out(ptrList(out).ptr, @intCast(out.len),
+        __c.atg__histogramdd_bin_edges_out(@ptrCast(ptrList(out)), @intCast(out.len),
                 self.c_tensor,
                 @constCast(bins.ptr), @intCast(bins.len),
                 @constCast(range_.ptr), @intCast(range_.len),
@@ -2847,7 +2861,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__histogramdd_from_bin_tensors(@ptrCast(&c_tensors), self.c_tensor,
-                ptrList(bins).ptr, @intCast(bins.len),
+                @ptrCast(ptrList(bins)), @intCast(bins.len),
                 if (weight != null) weight.?.c_tensor else null,
                 if (density)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -2861,7 +2875,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__histogramdd_from_bin_tensors_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                ptrList(bins).ptr, @intCast(bins.len),
+                @ptrCast(ptrList(bins)), @intCast(bins.len),
                 if (weight != null) weight.?.c_tensor else null,
                 if (density)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -2874,7 +2888,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__index_put_impl(@ptrCast(&c_tensors), self.c_tensor,
-                ptrListOpt(indices_).ptr, @intCast(indices_.len),
+                @ptrCast(ptrListOpt(indices_)), @intCast(indices_.len),
                 values_.c_tensor,
                 if (accumulate)  1  else  0,
                 if (unsafe)  1  else  0);
@@ -2888,7 +2902,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__index_put_impl_(@ptrCast(&c_tensors), self.c_tensor,
-                ptrListOpt(indices_).ptr, @intCast(indices_.len),
+                @ptrCast(ptrListOpt(indices_)), @intCast(indices_.len),
                 values_.c_tensor,
                 if (accumulate)  1  else  0,
                 if (unsafe)  1  else  0);
@@ -2903,7 +2917,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__index_put_impl_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                ptrListOpt(indices_).ptr, @intCast(indices_.len),
+                @ptrCast(ptrListOpt(indices_)), @intCast(indices_.len),
                 values_.c_tensor,
                 if (accumulate)  1  else  0,
                 if (unsafe)  1  else  0);
@@ -3236,8 +3250,8 @@ pub const Tensor = struct {
     ) [6]Tensor {
         var c_tensors = [_]C_tensor{null} ** 6;
         __c.atg__lstm_mps(@ptrCast(&c_tensors), self.c_tensor,
-                ptrList(hx).ptr, @intCast(hx.len),
-                ptrList(params).ptr, @intCast(params.len),
+                @ptrCast(ptrList(hx)), @intCast(hx.len),
+                @ptrCast(ptrList(params)), @intCast(params.len),
                 if (has_biases)  1  else  0,
                 num_layers,
                 dropout_,
@@ -3260,8 +3274,8 @@ pub const Tensor = struct {
                 out4.c_tensor,
                 out5.c_tensor,
                 self.c_tensor,
-                ptrList(hx).ptr, @intCast(hx.len),
-                ptrList(params).ptr, @intCast(params.len),
+                @ptrCast(ptrList(hx)), @intCast(hx.len),
+                @ptrCast(ptrList(params)), @intCast(params.len),
                 if (has_biases)  1  else  0,
                 num_layers,
                 dropout_,
@@ -3938,7 +3952,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__nested_sum_backward(@ptrCast(&c_tensors), gradient.c_tensor,
                 self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -4533,7 +4547,7 @@ pub const Tensor = struct {
         __c.atg__scaled_mm(@ptrCast(&c_tensors), self.c_tensor,
                 mat2.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                out_dtype orelse -1,
+                if (out_dtype) |__k| __k.cInt() else -1,
                 if (scale_a != null) scale_a.?.c_tensor else null,
                 if (scale_b != null) scale_b.?.c_tensor else null,
                 if (scale_result != null) scale_result.?.c_tensor else null,
@@ -4552,7 +4566,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 mat2.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
-                out_dtype orelse -1,
+                if (out_dtype) |__k| __k.cInt() else -1,
                 if (scale_a != null) scale_a.?.c_tensor else null,
                 if (scale_b != null) scale_b.?.c_tensor else null,
                 if (scale_result != null) scale_result.?.c_tensor else null,
@@ -4680,7 +4694,7 @@ pub const Tensor = struct {
                 sobolstate.c_tensor,
                 dimension,
                 num_generated,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return .{Tensor { .c_tensor = c_tensors[0] }, Tensor { .c_tensor = c_tensors[1] }};
@@ -4969,7 +4983,7 @@ pub const Tensor = struct {
         __c.atg__sparse_csr_prod(@ptrCast(&c_tensors), self.c_tensor,
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -4983,7 +4997,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -4996,7 +5010,7 @@ pub const Tensor = struct {
         __c.atg__sparse_csr_sum(@ptrCast(&c_tensors), self.c_tensor,
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -5010,7 +5024,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -5075,7 +5089,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_log_softmax_int(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -5163,7 +5177,7 @@ pub const Tensor = struct {
                 meta.c_tensor,
                 if (bias != null) bias.?.c_tensor else null,
                 @constCast(activation.ptr), @intCast(activation.len),
-                out_dtype orelse -1);
+                if (out_dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -5214,7 +5228,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__sparse_softmax_int(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -5344,7 +5358,7 @@ pub const Tensor = struct {
         __c.atg__spdiags(@ptrCast(&c_tensors), diagonals.c_tensor,
                 offsets.c_tensor,
                 @constCast(shape.ptr), @intCast(shape.len),
-                layout orelse - 1);
+                layout orelse -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -5358,7 +5372,7 @@ pub const Tensor = struct {
                 diagonals.c_tensor,
                 offsets.c_tensor,
                 @constCast(shape.ptr), @intCast(shape.len),
-                layout orelse - 1);
+                layout orelse -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -5368,7 +5382,7 @@ pub const Tensor = struct {
         tensors: []*const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg__stack(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len),
+        __c.atg__stack(@ptrCast(&c_tensors), @ptrCast(ptrList(tensors)), @intCast(tensors.len),
                 dim_);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -5380,7 +5394,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__stack_out(@ptrCast(&c_tensors), out.c_tensor,
-                ptrList(tensors).ptr, @intCast(tensors.len),
+                @ptrCast(ptrList(tensors)), @intCast(tensors.len),
                 dim_);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -5556,7 +5570,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_optional_filled_intlist(@ptrCast(&c_tensors), values_.c_tensor,
-                @constCast(addends.ptr), @intCast(addends.len));
+                @constCast(addends.?.ptr), @intCast(addends.?.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -5568,7 +5582,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_optional_filled_intlist_out(@ptrCast(&c_tensors), out.c_tensor,
                 values_.c_tensor,
-                @constCast(addends.ptr), @intCast(addends.len));
+                @constCast(addends.?.ptr), @intCast(addends.?.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -5602,7 +5616,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_optional_intlist(@ptrCast(&c_tensors), values_.c_tensor,
-                @constCast(addends.ptr), @intCast(addends.len));
+                @constCast(addends.?.ptr), @intCast(addends.?.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -5614,7 +5628,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__test_optional_intlist_out(@ptrCast(&c_tensors), out.c_tensor,
                 values_.c_tensor,
-                @constCast(addends.ptr), @intCast(addends.len));
+                @constCast(addends.?.ptr), @intCast(addends.?.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -5703,16 +5717,16 @@ pub const Tensor = struct {
     pub fn internalToCpu(
         tensors: []*const Tensor
     ) []Tensor {
-        const c_tensors = __c.atg__to_cpu(ptrList(tensors).ptr, @intCast(tensors.len));
+        const c_tensors = __c.atg__to_cpu(@ptrCast(ptrList(tensors)), @intCast(tensors.len));
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn internalToDense(
@@ -5720,7 +5734,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_dense(@ptrCast(&c_tensors), self.c_tensor,
-                dtype orelse -1,
+                if (dtype) |__k| __k.cInt() else -1,
                 if (masked_grad)  1  else  0);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -5733,7 +5747,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_dense_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dtype orelse -1,
+                if (dtype) |__k| __k.cInt() else -1,
                 if (masked_grad)  1  else  0);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -5745,8 +5759,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_sparse(@ptrCast(&c_tensors), self.c_tensor,
-                layout orelse - 1,
-                @constCast(blocksize.ptr), @intCast(blocksize.len),
+                layout orelse -1,
+                @constCast(blocksize.?.ptr), @intCast(blocksize.?.len),
                 dense_dim_ orelse 0, @intFromBool(dense_dim_ == null));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -5855,8 +5869,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__to_sparse_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                layout orelse - 1,
-                @constCast(blocksize.ptr), @intCast(blocksize.len),
+                layout orelse -1,
+                @constCast(blocksize.?.ptr), @intCast(blocksize.?.len),
                 dense_dim_ orelse 0, @intFromBool(dense_dim_ == null));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -6154,7 +6168,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__unsafe_index(@ptrCast(&c_tensors), self.c_tensor,
-                ptrListOpt(indices_).ptr, @intCast(indices_.len));
+                @ptrCast(ptrListOpt(indices_)), @intCast(indices_.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -6165,7 +6179,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__unsafe_index_put(@ptrCast(&c_tensors), self.c_tensor,
-                ptrListOpt(indices_).ptr, @intCast(indices_.len),
+                @ptrCast(ptrListOpt(indices_)), @intCast(indices_.len),
                 values_.c_tensor,
                 if (accumulate)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -6261,7 +6275,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_bicubic2d_aa_vec(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(output_size.?.ptr), @intCast(output_size.?.len),
                 if (align_corners)  1  else  0,
                 @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.memory_pool.put(&c_tensors);
@@ -6334,7 +6348,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_bilinear2d_aa_vec(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(output_size.?.ptr), @intCast(output_size.?.len),
                 if (align_corners)  1  else  0,
                 @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.memory_pool.put(&c_tensors);
@@ -6399,7 +6413,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact1d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(output_size.?.ptr), @intCast(output_size.?.len),
                 @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -6467,7 +6481,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact2d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(output_size.?.ptr), @intCast(output_size.?.len),
                 @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -6539,7 +6553,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg__upsample_nearest_exact3d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(output_size.?.ptr), @intCast(output_size.?.len),
                 @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -7477,16 +7491,16 @@ pub const Tensor = struct {
     pub fn alignTensors(
         tensors: []*const Tensor
     ) []Tensor {
-        const c_tensors = __c.atg_align_tensors(ptrList(tensors).ptr, @intCast(tensors.len));
+        const c_tensors = __c.atg_align_tensors(@ptrCast(ptrList(tensors)), @intCast(tensors.len));
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn all(
@@ -7527,7 +7541,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_all_dims(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -7540,7 +7554,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_all_dims_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -7731,7 +7745,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_any_dims(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -7744,7 +7758,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_any_dims_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -8372,16 +8386,16 @@ pub const Tensor = struct {
     pub fn atleast1dSequence(
         tensors: []*const Tensor
     ) []Tensor {
-        const c_tensors = __c.atg_atleast_1d_sequence(ptrList(tensors).ptr, @intCast(tensors.len));
+        const c_tensors = __c.atg_atleast_1d_sequence(@ptrCast(ptrList(tensors)), @intCast(tensors.len));
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn atleast2d(
@@ -8397,16 +8411,16 @@ pub const Tensor = struct {
     pub fn atleast2dSequence(
         tensors: []*const Tensor
     ) []Tensor {
-        const c_tensors = __c.atg_atleast_2d_sequence(ptrList(tensors).ptr, @intCast(tensors.len));
+        const c_tensors = __c.atg_atleast_2d_sequence(@ptrCast(ptrList(tensors)), @intCast(tensors.len));
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn atleast3d(
@@ -8422,16 +8436,16 @@ pub const Tensor = struct {
     pub fn atleast3dSequence(
         tensors: []*const Tensor
     ) []Tensor {
-        const c_tensors = __c.atg_atleast_3d_sequence(ptrList(tensors).ptr, @intCast(tensors.len));
+        const c_tensors = __c.atg_atleast_3d_sequence(@ptrCast(ptrList(tensors)), @intCast(tensors.len));
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn avgPool1d(
@@ -9652,7 +9666,7 @@ pub const Tensor = struct {
         tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_block_diag(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len));
+        __c.atg_block_diag(@ptrCast(&c_tensors), @ptrCast(ptrList(tensors)), @intCast(tensors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -9663,7 +9677,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_block_diag_out(@ptrCast(&c_tensors), out.c_tensor,
-                ptrList(tensors).ptr, @intCast(tensors.len));
+                @ptrCast(ptrList(tensors)), @intCast(tensors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -9695,16 +9709,16 @@ pub const Tensor = struct {
     pub fn broadcastTensors(
         tensors: []*const Tensor
     ) []Tensor {
-        const c_tensors = __c.atg_broadcast_tensors(ptrList(tensors).ptr, @intCast(tensors.len));
+        const c_tensors = __c.atg_broadcast_tensors(@ptrCast(ptrList(tensors)), @intCast(tensors.len));
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn broadcastTo(
@@ -9785,7 +9799,7 @@ pub const Tensor = struct {
         tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_cartesian_prod(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len));
+        __c.atg_cartesian_prod(@ptrCast(&c_tensors), @ptrCast(ptrList(tensors)), @intCast(tensors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -9795,7 +9809,7 @@ pub const Tensor = struct {
         tensors: []*const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_cat(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len),
+        __c.atg_cat(@ptrCast(&c_tensors), @ptrCast(ptrList(tensors)), @intCast(tensors.len),
                 dim_);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -9807,7 +9821,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cat_out(@ptrCast(&c_tensors), out.c_tensor,
-                ptrList(tensors).ptr, @intCast(tensors.len),
+                @ptrCast(ptrList(tensors)), @intCast(tensors.len),
                 dim_);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -9961,7 +9975,7 @@ pub const Tensor = struct {
         matrices: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_chain_matmul(@ptrCast(&c_tensors), ptrList(matrices).ptr, @intCast(matrices.len));
+        __c.atg_chain_matmul(@ptrCast(&c_tensors), @ptrCast(ptrList(matrices)), @intCast(matrices.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -9972,7 +9986,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_chain_matmul_out(@ptrCast(&c_tensors), out.c_tensor,
-                ptrList(matrices).ptr, @intCast(matrices.len));
+                @ptrCast(ptrList(matrices)), @intCast(matrices.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -10107,10 +10121,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn clamp(
@@ -10484,7 +10498,7 @@ pub const Tensor = struct {
         tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_column_stack(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len));
+        __c.atg_column_stack(@ptrCast(&c_tensors), @ptrCast(ptrList(tensors)), @intCast(tensors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -10495,7 +10509,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_column_stack_out(@ptrCast(&c_tensors), out.c_tensor,
-                ptrList(tensors).ptr, @intCast(tensors.len));
+                @ptrCast(ptrList(tensors)), @intCast(tensors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -10540,7 +10554,7 @@ pub const Tensor = struct {
         tensors: []*const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_concat(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len),
+        __c.atg_concat(@ptrCast(&c_tensors), @ptrCast(ptrList(tensors)), @intCast(tensors.len),
                 dim_);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -10552,7 +10566,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_concat_out(@ptrCast(&c_tensors), out.c_tensor,
-                ptrList(tensors).ptr, @intCast(tensors.len),
+                @ptrCast(ptrList(tensors)), @intCast(tensors.len),
                 dim_);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -10563,7 +10577,7 @@ pub const Tensor = struct {
         tensors: []*const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_concatenate(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len),
+        __c.atg_concatenate(@ptrCast(&c_tensors), @ptrCast(ptrList(tensors)), @intCast(tensors.len),
                 dim_);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -10575,7 +10589,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_concatenate_out(@ptrCast(&c_tensors), out.c_tensor,
-                ptrList(tensors).ptr, @intCast(tensors.len),
+                @ptrCast(ptrList(tensors)), @intCast(tensors.len),
                 dim_);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -11722,7 +11736,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cumprod(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -11734,7 +11748,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cumprod_(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -11760,7 +11774,7 @@ pub const Tensor = struct {
         __c.atg_cumprod_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 dim_,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -11772,7 +11786,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cumsum(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -11784,7 +11798,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cumsum_(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -11797,7 +11811,7 @@ pub const Tensor = struct {
         __c.atg_cumsum_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 dim_,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -11899,23 +11913,23 @@ pub const Tensor = struct {
     pub fn dequantizeTensors(
         tensors: []*const Tensor
     ) []Tensor {
-        const c_tensors = __c.atg_dequantize_tensors(ptrList(tensors).ptr, @intCast(tensors.len));
+        const c_tensors = __c.atg_dequantize_tensors(@ptrCast(ptrList(tensors)), @intCast(tensors.len));
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn dequantizeTensorsOut(
         out: []*const Tensor, tensors: []*const Tensor
     ) void {
-        __c.atg_dequantize_tensors_out(ptrList(out).ptr, @intCast(out.len),
-                ptrList(tensors).ptr, @intCast(tensors.len));
+        __c.atg_dequantize_tensors_out(@ptrCast(ptrList(out)), @intCast(out.len),
+                @ptrCast(ptrList(tensors)), @intCast(tensors.len));
         torch.readAndCleanError();
         return;
     }
@@ -12529,10 +12543,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn dsplitArray(
@@ -12545,17 +12559,17 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn dstack(
         tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_dstack(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len));
+        __c.atg_dstack(@ptrCast(&c_tensors), @ptrCast(ptrList(tensors)), @intCast(tensors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -12566,7 +12580,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_dstack_out(@ptrCast(&c_tensors), out.c_tensor,
-                ptrList(tensors).ptr, @intCast(tensors.len));
+                @ptrCast(ptrList(tensors)), @intCast(tensors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -12577,8 +12591,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_einsum(@ptrCast(&c_tensors), @constCast(equation.ptr), @intCast(equation.len),
-                ptrList(tensors).ptr, @intCast(tensors.len),
-                @constCast(path.ptr), @intCast(path.len));
+                @ptrCast(ptrList(tensors)), @intCast(tensors.len),
+                @constCast(path.?.ptr), @intCast(path.?.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -13595,7 +13609,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fft2(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
@@ -13609,7 +13623,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fft2_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
@@ -13660,8 +13674,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fftn(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -13674,8 +13688,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fftn_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -13687,7 +13701,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_fftshift(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len));
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -13711,7 +13725,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_hfft2(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
@@ -13725,7 +13739,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_hfft2_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
@@ -13752,8 +13766,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_hfftn(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -13766,8 +13780,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_hfftn_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -13792,7 +13806,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ifft2(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
@@ -13806,7 +13820,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ifft2_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
@@ -13833,8 +13847,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ifftn(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -13847,8 +13861,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ifftn_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -13860,7 +13874,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ifftshift(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len));
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -13884,7 +13898,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ihfft2(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
@@ -13898,7 +13912,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ihfft2_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
@@ -13925,8 +13939,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ihfftn(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -13939,8 +13953,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_ihfftn_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -13965,7 +13979,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_irfft2(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
@@ -13979,7 +13993,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_irfft2_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
@@ -14006,8 +14020,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_irfftn(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -14020,8 +14034,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_irfftn_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -14046,7 +14060,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_rfft2(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
@@ -14060,7 +14074,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_rfft2_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
@@ -14111,8 +14125,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_rfftn(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -14125,8 +14139,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_fft_rfftn_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(s.ptr), @intCast(s.len),
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(s.?.ptr), @intCast(s.?.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 @constCast(norm_.ptr), @intCast(norm_.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -14260,7 +14274,7 @@ pub const Tensor = struct {
         tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_flatten_dense_tensors(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len));
+        __c.atg_flatten_dense_tensors(@ptrCast(&c_tensors), @ptrCast(ptrList(tensors)), @intCast(tensors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -15526,7 +15540,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_gru(@ptrCast(&c_tensors), self.c_tensor,
                 hx.c_tensor,
-                ptrList(params).ptr, @intCast(params.len),
+                @ptrCast(ptrList(params)), @intCast(params.len),
                 if (has_biases)  1  else  0,
                 num_layers,
                 dropout_,
@@ -15560,7 +15574,7 @@ pub const Tensor = struct {
         __c.atg_gru_data(@ptrCast(&c_tensors), data_.c_tensor,
                 batch_sizes.c_tensor,
                 hx.c_tensor,
-                ptrList(params).ptr, @intCast(params.len),
+                @ptrCast(ptrList(params)), @intCast(params.len),
                 if (has_biases)  1  else  0,
                 num_layers,
                 dropout_,
@@ -16135,10 +16149,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn hsplitArray(
@@ -16151,10 +16165,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn hspmm(
@@ -16184,7 +16198,7 @@ pub const Tensor = struct {
         tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_hstack(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len));
+        __c.atg_hstack(@ptrCast(&c_tensors), @ptrCast(ptrList(tensors)), @intCast(tensors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -16195,7 +16209,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hstack_out(@ptrCast(&c_tensors), out.c_tensor,
-                ptrList(tensors).ptr, @intCast(tensors.len));
+                @ptrCast(ptrList(tensors)), @intCast(tensors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -16434,7 +16448,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index(@ptrCast(&c_tensors), self.c_tensor,
-                ptrListOpt(indices_).ptr, @intCast(indices_.len));
+                @ptrCast(ptrListOpt(indices_)), @intCast(indices_.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -16605,7 +16619,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_put(@ptrCast(&c_tensors), self.c_tensor,
-                ptrListOpt(indices_).ptr, @intCast(indices_.len),
+                @ptrCast(ptrListOpt(indices_)), @intCast(indices_.len),
                 values_.c_tensor,
                 if (accumulate)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -16618,7 +16632,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_put_(@ptrCast(&c_tensors), self.c_tensor,
-                ptrListOpt(indices_).ptr, @intCast(indices_.len),
+                @ptrCast(ptrListOpt(indices_)), @intCast(indices_.len),
                 values_.c_tensor,
                 if (accumulate)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -16632,7 +16646,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_put_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                ptrListOpt(indices_).ptr, @intCast(indices_.len),
+                @ptrCast(ptrListOpt(indices_)), @intCast(indices_.len),
                 values_.c_tensor,
                 if (accumulate)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -16730,7 +16744,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_index_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                ptrListOpt(indices_).ptr, @intCast(indices_.len));
+                @ptrCast(ptrListOpt(indices_)), @intCast(indices_.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -18544,7 +18558,7 @@ pub const Tensor = struct {
         tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_linalg_multi_dot(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len));
+        __c.atg_linalg_multi_dot(@ptrCast(&c_tensors), @ptrCast(ptrList(tensors)), @intCast(tensors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -18555,7 +18569,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_multi_dot_out(@ptrCast(&c_tensors), out.c_tensor,
-                ptrList(tensors).ptr, @intCast(tensors.len));
+                @ptrCast(ptrList(tensors)), @intCast(tensors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -18567,9 +18581,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_norm(@ptrCast(&c_tensors), self.c_tensor,
                 ord.c_scalar,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -18581,9 +18595,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_norm_ord_str(@ptrCast(&c_tensors), self.c_tensor,
                 @constCast(ord.ptr), @intCast(ord.len),
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -18596,9 +18610,9 @@ pub const Tensor = struct {
         __c.atg_linalg_norm_ord_str_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 @constCast(ord.ptr), @intCast(ord.len),
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -18611,9 +18625,9 @@ pub const Tensor = struct {
         __c.atg_linalg_norm_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 ord.c_scalar,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -18930,7 +18944,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_linalg_tensorsolve(@ptrCast(&c_tensors), self.c_tensor,
                 other.c_tensor,
-                @constCast(dims.ptr), @intCast(dims.len));
+                @constCast(dims.?.ptr), @intCast(dims.?.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -18943,7 +18957,7 @@ pub const Tensor = struct {
         __c.atg_linalg_tensorsolve_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 other.c_tensor,
-                @constCast(dims.ptr), @intCast(dims.len));
+                @constCast(dims.?.ptr), @intCast(dims.?.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -19327,7 +19341,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_log_softmax(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -19340,7 +19354,7 @@ pub const Tensor = struct {
         __c.atg_log_softmax_int_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 dim_,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -19759,8 +19773,8 @@ pub const Tensor = struct {
     ) [3]Tensor {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_lstm(@ptrCast(&c_tensors), self.c_tensor,
-                ptrList(hx).ptr, @intCast(hx.len),
-                ptrList(params).ptr, @intCast(params.len),
+                @ptrCast(ptrList(hx)), @intCast(hx.len),
+                @ptrCast(ptrList(params)), @intCast(params.len),
                 if (has_biases)  1  else  0,
                 num_layers,
                 dropout_,
@@ -19777,7 +19791,7 @@ pub const Tensor = struct {
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_lstm_cell(@ptrCast(&c_tensors), self.c_tensor,
-                ptrList(hx).ptr, @intCast(hx.len),
+                @ptrCast(ptrList(hx)), @intCast(hx.len),
                 w_ih.c_tensor,
                 w_hh.c_tensor,
                 if (b_ih != null) b_ih.?.c_tensor else null,
@@ -19793,8 +19807,8 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 3;
         __c.atg_lstm_data(@ptrCast(&c_tensors), data_.c_tensor,
                 batch_sizes.c_tensor,
-                ptrList(hx).ptr, @intCast(hx.len),
-                ptrList(params).ptr, @intCast(params.len),
+                @ptrCast(ptrList(hx)), @intCast(hx.len),
+                @ptrCast(ptrList(params)), @intCast(params.len),
                 if (has_biases)  1  else  0,
                 num_layers,
                 dropout_,
@@ -19809,8 +19823,8 @@ pub const Tensor = struct {
         self: *const Tensor, out0: *const Tensor, out1: []*const Tensor, out2: []*const Tensor, grad_y: ?*const Tensor, grad_hy: ?*const Tensor, grad_cy: ?*const Tensor, z_state: *const Tensor, cell_state_fwd: *const Tensor, layersoutputs: *const Tensor, hx: []*const Tensor, params: []*const Tensor, has_biases: bool, num_layers: i64, dropout_: f64, train: bool, bidirectional: bool, batch_first: bool
     ) void {
         __c.atg_lstm_mps_backward(out0.c_tensor,
-                ptrList(out1).ptr, @intCast(out1.len),
-                ptrList(out2).ptr, @intCast(out2.len),
+                @ptrCast(ptrList(out1)), @intCast(out1.len),
+                @ptrCast(ptrList(out2)), @intCast(out2.len),
                 if (grad_y != null) grad_y.?.c_tensor else null,
                 if (grad_hy != null) grad_hy.?.c_tensor else null,
                 if (grad_cy != null) grad_cy.?.c_tensor else null,
@@ -19818,8 +19832,8 @@ pub const Tensor = struct {
                 cell_state_fwd.c_tensor,
                 self.c_tensor,
                 layersoutputs.c_tensor,
-                ptrList(hx).ptr, @intCast(hx.len),
-                ptrList(params).ptr, @intCast(params.len),
+                @ptrCast(ptrList(hx)), @intCast(hx.len),
+                @ptrCast(ptrList(params)), @intCast(params.len),
                 if (has_biases)  1  else  0,
                 num_layers,
                 dropout_,
@@ -20580,7 +20594,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mean(@ptrCast(&c_tensors), self.c_tensor,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -20591,9 +20605,9 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mean_dim(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -20605,9 +20619,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mean_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -20663,32 +20677,32 @@ pub const Tensor = struct {
     pub fn meshgrid(
         tensors: []*const Tensor
     ) []Tensor {
-        const c_tensors = __c.atg_meshgrid(ptrList(tensors).ptr, @intCast(tensors.len));
+        const c_tensors = __c.atg_meshgrid(@ptrCast(ptrList(tensors)), @intCast(tensors.len));
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn meshgridIndexing(
         tensors: []*const Tensor, indexing: []const u8
     ) []Tensor {
-        const c_tensors = __c.atg_meshgrid_indexing(ptrList(tensors).ptr, @intCast(tensors.len),
+        const c_tensors = __c.atg_meshgrid_indexing(@ptrCast(ptrList(tensors)), @intCast(tensors.len),
                 @constCast(indexing.ptr), @intCast(indexing.len));
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn mh(
@@ -21020,7 +21034,7 @@ pub const Tensor = struct {
     ) [5]Tensor {
         var c_tensors = [_]C_tensor{null} ** 5;
         __c.atg_miopen_rnn(@ptrCast(&c_tensors), self.c_tensor,
-                ptrList(weight).ptr, @intCast(weight.len),
+                @ptrCast(ptrList(weight)), @intCast(weight.len),
                 weight_stride0,
                 hx.c_tensor,
                 if (cx != null) cx.?.c_tensor else null,
@@ -21048,7 +21062,7 @@ pub const Tensor = struct {
                 out3.c_tensor,
                 out4.c_tensor,
                 self.c_tensor,
-                ptrList(weight).ptr, @intCast(weight.len),
+                @ptrCast(ptrList(weight)), @intCast(weight.len),
                 weight_stride0,
                 hx.c_tensor,
                 if (cx != null) cx.?.c_tensor else null,
@@ -21406,7 +21420,7 @@ pub const Tensor = struct {
                 @constCast(stride_.ptr), @intCast(stride_.len),
                 @constCast(dilation.ptr), @intCast(dilation.len),
                 groups,
-                @constCast(input_size.ptr), @intCast(input_size.len));
+                @constCast(input_size.?.ptr), @intCast(input_size.?.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -21422,7 +21436,7 @@ pub const Tensor = struct {
                 @constCast(stride_.ptr), @intCast(stride_.len),
                 @constCast(dilation.ptr), @intCast(dilation.len),
                 groups,
-                @constCast(input_size.ptr), @intCast(input_size.len));
+                @constCast(input_size.?.ptr), @intCast(input_size.?.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -22100,9 +22114,9 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nanmean(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -22114,9 +22128,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nanmean_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -22232,9 +22246,9 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nansum(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -22246,9 +22260,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nansum_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -22503,7 +22517,7 @@ pub const Tensor = struct {
                 p.c_scalar,
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -22518,7 +22532,7 @@ pub const Tensor = struct {
                 p.c_scalar,
                 @constCast(dim_.ptr), @intCast(dim_.len),
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -22660,7 +22674,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nested_to_padded_tensor(@ptrCast(&c_tensors), self.c_tensor,
                 padding,
-                @constCast(output_size.ptr), @intCast(output_size.len));
+                @constCast(output_size.?.ptr), @intCast(output_size.?.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -22981,10 +22995,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn nonzeroOut(
@@ -23441,7 +23455,7 @@ pub const Tensor = struct {
         sequences: []*const Tensor, batch_first: bool, padding_value: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_pad_sequence(@ptrCast(&c_tensors), ptrList(sequences).ptr, @intCast(sequences.len),
+        __c.atg_pad_sequence(@ptrCast(&c_tensors), @ptrCast(ptrList(sequences)), @intCast(sequences.len),
                 if (batch_first)  1  else  0,
                 padding_value);
         torch.memory_pool.put(&c_tensors);
@@ -23786,7 +23800,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_prod(@ptrCast(&c_tensors), self.c_tensor,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -23799,7 +23813,7 @@ pub const Tensor = struct {
         __c.atg_prod_dim_int(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -23813,7 +23827,7 @@ pub const Tensor = struct {
                 self.c_tensor,
                 dim_,
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -23825,7 +23839,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_prod_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -24130,7 +24144,7 @@ pub const Tensor = struct {
     pub fn quantizePerTensorTensors(
         tensors: []*const Tensor, scales: *const Tensor, zero_points: *const Tensor, dtype: Kind
     ) []Tensor {
-        const c_tensors = __c.atg_quantize_per_tensor_tensors(ptrList(tensors).ptr, @intCast(tensors.len),
+        const c_tensors = __c.atg_quantize_per_tensor_tensors(@ptrCast(ptrList(tensors)), @intCast(tensors.len),
                 scales.c_tensor,
                 zero_points.c_tensor,
                 dtype.cInt());
@@ -24139,17 +24153,17 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn quantizePerTensorTensorsOut(
         out: []*const Tensor, tensors: []*const Tensor, scales: *const Tensor, zero_points: *const Tensor, dtype: Kind
     ) void {
-        __c.atg_quantize_per_tensor_tensors_out(ptrList(out).ptr, @intCast(out.len),
-                ptrList(tensors).ptr, @intCast(tensors.len),
+        __c.atg_quantize_per_tensor_tensors_out(@ptrCast(ptrList(out)), @intCast(out.len),
+                @ptrCast(ptrList(tensors)), @intCast(tensors.len),
                 scales.c_tensor,
                 zero_points.c_tensor,
                 dtype.cInt());
@@ -24220,7 +24234,7 @@ pub const Tensor = struct {
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_quantized_lstm_cell(@ptrCast(&c_tensors), self.c_tensor,
-                ptrList(hx).ptr, @intCast(hx.len),
+                @ptrCast(ptrList(hx)), @intCast(hx.len),
                 w_ih.c_tensor,
                 w_hh.c_tensor,
                 b_ih.c_tensor,
@@ -25526,7 +25540,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_rnn_relu(@ptrCast(&c_tensors), self.c_tensor,
                 hx.c_tensor,
-                ptrList(params).ptr, @intCast(params.len),
+                @ptrCast(ptrList(params)), @intCast(params.len),
                 if (has_biases)  1  else  0,
                 num_layers,
                 dropout_,
@@ -25560,7 +25574,7 @@ pub const Tensor = struct {
         __c.atg_rnn_relu_data(@ptrCast(&c_tensors), data_.c_tensor,
                 batch_sizes.c_tensor,
                 hx.c_tensor,
-                ptrList(params).ptr, @intCast(params.len),
+                @ptrCast(ptrList(params)), @intCast(params.len),
                 if (has_biases)  1  else  0,
                 num_layers,
                 dropout_,
@@ -25577,7 +25591,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_rnn_tanh(@ptrCast(&c_tensors), self.c_tensor,
                 hx.c_tensor,
-                ptrList(params).ptr, @intCast(params.len),
+                @ptrCast(ptrList(params)), @intCast(params.len),
                 if (has_biases)  1  else  0,
                 num_layers,
                 dropout_,
@@ -25611,7 +25625,7 @@ pub const Tensor = struct {
         __c.atg_rnn_tanh_data(@ptrCast(&c_tensors), data_.c_tensor,
                 batch_sizes.c_tensor,
                 hx.c_tensor,
-                ptrList(params).ptr, @intCast(params.len),
+                @ptrCast(ptrList(params)), @intCast(params.len),
                 if (has_biases)  1  else  0,
                 num_layers,
                 dropout_,
@@ -25772,7 +25786,7 @@ pub const Tensor = struct {
         tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_row_stack(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len));
+        __c.atg_row_stack(@ptrCast(&c_tensors), @ptrCast(ptrList(tensors)), @intCast(tensors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -25783,7 +25797,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_row_stack_out(@ptrCast(&c_tensors), out.c_tensor,
-                ptrList(tensors).ptr, @intCast(tensors.len));
+                @ptrCast(ptrList(tensors)), @intCast(tensors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -27227,7 +27241,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_softmax(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -27240,7 +27254,7 @@ pub const Tensor = struct {
         __c.atg_softmax_int_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 dim_,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -28759,7 +28773,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_log_softmax(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -29374,7 +29388,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_special_softmax(@ptrCast(&c_tensors), self.c_tensor,
                 dim_,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -29619,10 +29633,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn splitCopy(
@@ -29636,16 +29650,16 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn splitCopyTensorOut(
         self: *const Tensor, out: []*const Tensor, split_size: i64, dim_: i64
     ) void {
-        __c.atg_split_copy_tensor_out(ptrList(out).ptr, @intCast(out.len),
+        __c.atg_split_copy_tensor_out(@ptrCast(ptrList(out)), @intCast(out.len),
                 self.c_tensor,
                 split_size,
                 dim_);
@@ -29664,10 +29678,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn splitWithSizes(
@@ -29681,10 +29695,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn splitWithSizesCopy(
@@ -29698,16 +29712,16 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn splitWithSizesCopyOut(
         self: *const Tensor, out: []*const Tensor, split_sizes_: []const i64, dim_: i64
     ) void {
-        __c.atg_split_with_sizes_copy_out(ptrList(out).ptr, @intCast(out.len),
+        __c.atg_split_with_sizes_copy_out(@ptrCast(ptrList(out)), @intCast(out.len),
                 self.c_tensor,
                 @constCast(split_sizes_.ptr), @intCast(split_sizes_.len),
                 dim_);
@@ -29937,7 +29951,7 @@ pub const Tensor = struct {
         tensors: []*const Tensor, dim_: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_stack(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len),
+        __c.atg_stack(@ptrCast(&c_tensors), @ptrCast(ptrList(tensors)), @intCast(tensors.len),
                 dim_);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -29949,7 +29963,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_stack_out(@ptrCast(&c_tensors), out.c_tensor,
-                ptrList(tensors).ptr, @intCast(tensors.len),
+                @ptrCast(ptrList(tensors)), @intCast(tensors.len),
                 dim_);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -29972,7 +29986,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_std_correction(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 correction.c_scalar,
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -29986,7 +30000,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_std_correction_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 correction.c_scalar,
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -29999,7 +30013,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_std_dim(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (unbiased)  1  else  0,
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -30023,7 +30037,7 @@ pub const Tensor = struct {
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_std_mean_correction(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 correction.c_scalar,
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -30038,7 +30052,7 @@ pub const Tensor = struct {
         __c.atg_std_mean_correction_out(@ptrCast(&c_tensors), out0.c_tensor,
                 out1.c_tensor,
                 self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 correction.c_scalar,
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -30051,7 +30065,7 @@ pub const Tensor = struct {
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_std_mean_dim(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (unbiased)  1  else  0,
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -30065,7 +30079,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_std_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (unbiased)  1  else  0,
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -30238,7 +30252,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sum(@ptrCast(&c_tensors), self.c_tensor,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -30249,9 +30263,9 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sum_dim_intlist(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -30263,9 +30277,9 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sum_intlist_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (keepdim)  1  else  0,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -30277,7 +30291,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_sum_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -30554,10 +30568,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn tensorSplitIndices(
@@ -30571,10 +30585,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn tensorSplitTensorIndicesOrSections(
@@ -30588,10 +30602,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn tensordot(
@@ -30710,7 +30724,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_dense(@ptrCast(&c_tensors), self.c_tensor,
-                dtype orelse -1,
+                if (dtype) |__k| __k.cInt() else -1,
                 if (masked_grad)  1  else  0);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -30774,7 +30788,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_mkldnn(@ptrCast(&c_tensors), self.c_tensor,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -30797,7 +30811,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_mkldnn_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                dtype orelse -1);
+                if (dtype) |__k| __k.cInt() else -1);
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -30822,7 +30836,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_padded_tensor(@ptrCast(&c_tensors), self.c_tensor,
                 padding,
-                @constCast(output_size.ptr), @intCast(output_size.len));
+                @constCast(output_size.?.ptr), @intCast(output_size.?.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -30835,7 +30849,7 @@ pub const Tensor = struct {
         __c.atg_to_padded_tensor_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
                 padding,
-                @constCast(output_size.ptr), @intCast(output_size.len));
+                @constCast(output_size.?.ptr), @intCast(output_size.?.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -30846,8 +30860,8 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_to_sparse(@ptrCast(&c_tensors), self.c_tensor,
-                layout orelse - 1,
-                @constCast(blocksize.ptr), @intCast(blocksize.len),
+                layout orelse -1,
+                @constCast(blocksize.?.ptr), @intCast(blocksize.?.len),
                 dense_dim_ orelse 0, @intFromBool(dense_dim_ == null));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -31355,10 +31369,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn unbindCopy(
@@ -31371,16 +31385,16 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn unbindCopyIntOut(
         self: *const Tensor, out: []*const Tensor, dim_: i64
     ) void {
-        __c.atg_unbind_copy_int_out(ptrList(out).ptr, @intCast(out.len),
+        __c.atg_unbind_copy_int_out(@ptrCast(ptrList(out)), @intCast(out.len),
                 self.c_tensor,
                 dim_);
         torch.readAndCleanError();
@@ -31403,16 +31417,16 @@ pub const Tensor = struct {
         flat: *const Tensor, tensors: []*const Tensor
     ) []Tensor {
         const c_tensors = __c.atg_unflatten_dense_tensors(flat.c_tensor,
-                ptrList(tensors).ptr, @intCast(tensors.len));
+                @ptrCast(ptrList(tensors)), @intCast(tensors.len));
         var r__ = std.ArrayList(Tensor).init(torch.global_allocator);
         var idx: usize = 0;
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn unfold(
@@ -31621,10 +31635,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn unsafeSplit(
@@ -31638,16 +31652,16 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn unsafeSplitTensorOut(
         self: *const Tensor, out: []*const Tensor, split_size: i64, dim_: i64
     ) void {
-        __c.atg_unsafe_split_tensor_out(ptrList(out).ptr, @intCast(out.len),
+        __c.atg_unsafe_split_tensor_out(@ptrCast(ptrList(out)), @intCast(out.len),
                 self.c_tensor,
                 split_size,
                 dim_);
@@ -31666,16 +31680,16 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn unsafeSplitWithSizesOut(
         self: *const Tensor, out: []*const Tensor, split_sizes_: []const i64, dim_: i64
     ) void {
-        __c.atg_unsafe_split_with_sizes_out(ptrList(out).ptr, @intCast(out.len),
+        __c.atg_unsafe_split_with_sizes_out(@ptrCast(ptrList(out)), @intCast(out.len),
                 self.c_tensor,
                 @constCast(split_sizes_.ptr), @intCast(split_sizes_.len),
                 dim_);
@@ -31793,7 +31807,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_bicubic2d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(output_size.?.ptr), @intCast(output_size.?.len),
                 if (align_corners)  1  else  0,
                 @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.memory_pool.put(&c_tensors);
@@ -31866,7 +31880,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_bilinear2d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(output_size.?.ptr), @intCast(output_size.?.len),
                 if (align_corners)  1  else  0,
                 @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.memory_pool.put(&c_tensors);
@@ -31935,7 +31949,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_linear1d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(output_size.?.ptr), @intCast(output_size.?.len),
                 if (align_corners)  1  else  0,
                 @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.memory_pool.put(&c_tensors);
@@ -32000,7 +32014,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest1d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(output_size.?.ptr), @intCast(output_size.?.len),
                 @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -32068,7 +32082,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest2d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(output_size.?.ptr), @intCast(output_size.?.len),
                 @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -32140,7 +32154,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_nearest3d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(output_size.?.ptr), @intCast(output_size.?.len),
                 @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
@@ -32216,7 +32230,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_upsample_trilinear3d_vec(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(output_size.ptr), @intCast(output_size.len),
+                @constCast(output_size.?.ptr), @intCast(output_size.?.len),
                 if (align_corners)  1  else  0,
                 @constCast(scale_factors.ptr), @intCast(scale_factors.len));
         torch.memory_pool.put(&c_tensors);
@@ -32297,7 +32311,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_var_correction(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 correction.c_scalar,
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -32311,7 +32325,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_var_correction_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 correction.c_scalar,
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -32324,7 +32338,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_var_dim(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (unbiased)  1  else  0,
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -32348,7 +32362,7 @@ pub const Tensor = struct {
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_var_mean_correction(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 correction.c_scalar,
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -32363,7 +32377,7 @@ pub const Tensor = struct {
         __c.atg_var_mean_correction_out(@ptrCast(&c_tensors), out0.c_tensor,
                 out1.c_tensor,
                 self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 correction.c_scalar,
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -32376,7 +32390,7 @@ pub const Tensor = struct {
     ) [2]Tensor {
         var c_tensors = [_]C_tensor{null} ** 2;
         __c.atg_var_mean_dim(@ptrCast(&c_tensors), self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (unbiased)  1  else  0,
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -32390,7 +32404,7 @@ pub const Tensor = struct {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_var_out(@ptrCast(&c_tensors), out.c_tensor,
                 self.c_tensor,
-                @constCast(dim_.ptr), @intCast(dim_.len),
+                @constCast(dim_.?.ptr), @intCast(dim_.?.len),
                 if (unbiased)  1  else  0,
                 if (keepdim)  1  else  0);
         torch.memory_pool.put(&c_tensors);
@@ -32572,10 +32586,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn vsplitArray(
@@ -32588,17 +32602,17 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn vstack(
         tensors: []*const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
-        __c.atg_vstack(@ptrCast(&c_tensors), ptrList(tensors).ptr, @intCast(tensors.len));
+        __c.atg_vstack(@ptrCast(&c_tensors), @ptrCast(ptrList(tensors)), @intCast(tensors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -32609,7 +32623,7 @@ pub const Tensor = struct {
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_vstack_out(@ptrCast(&c_tensors), out.c_tensor,
-                ptrList(tensors).ptr, @intCast(tensors.len));
+                @ptrCast(ptrList(tensors)), @intCast(tensors.len));
         torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor { .c_tensor = c_tensors[0] };
@@ -32624,10 +32638,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ });
+            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
             idx += 1;
         }
-        return r__;
+        return r__.toOwnedSlice() catch unreachable;
     }
 
     pub fn whereScalar(

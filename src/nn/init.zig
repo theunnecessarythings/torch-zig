@@ -240,7 +240,7 @@ pub fn zeros_(tensor: *Tensor) Tensor {
 pub fn caclculateFanInAndFanOut(tensor: *const Tensor) [2]i64 {
     const size = tensor.size();
     if (size.len != 2) {
-        std.log.warn("Only tensors with 2 dimensions are supported", .{});
+        // std.log.warn("Only tensors with 2 dimensions are supported", .{});
     }
     var fan_in: i64 = 0;
     var fan_out: i64 = 0;

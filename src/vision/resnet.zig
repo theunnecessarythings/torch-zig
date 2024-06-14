@@ -75,8 +75,8 @@ const BasicBlock = struct {
         self.bn2 = BatchNorm2D.init(.{ .num_features = planes, .tensor_opts = options });
         if (stride != 1 or (inplanes != planes)) {
             self.downsample = Sequential.init(options)
-                .add(conv1x1(inplanes, planes, stride, options).base_module)
-                .add(BatchNorm2D.init(.{ .num_features = planes, .tensor_opts = options }).base_module);
+                .add(conv1x1(inplanes, planes, stride, options))
+                .add(BatchNorm2D.init(.{ .num_features = planes, .tensor_opts = options }));
         } else {
             self.downsample = Sequential.init(options);
         }
@@ -85,11 +85,11 @@ const BasicBlock = struct {
     }
 
     pub fn reset(self: *Self) void {
-        _ = self.base_module.registerModule("conv1", self.conv1.base_module);
-        _ = self.base_module.registerModule("bn1", self.bn1.base_module);
-        _ = self.base_module.registerModule("conv2", self.conv2.base_module);
-        _ = self.base_module.registerModule("bn2", self.bn2.base_module);
-        _ = self.base_module.registerModule("downsample", self.downsample.base_module);
+        _ = self.base_module.registerModule("conv1", self.conv1);
+        _ = self.base_module.registerModule("bn1", self.bn1);
+        _ = self.base_module.registerModule("conv2", self.conv2);
+        _ = self.base_module.registerModule("bn2", self.bn2);
+        _ = self.base_module.registerModule("downsample", self.downsample);
         self.conv1.reset();
         self.bn1.reset();
         self.conv2.reset();
@@ -143,7 +143,7 @@ pub const Bottleneck = struct {
         var self = torch.global_allocator.create(Self) catch unreachable;
         self.* = Self{};
         self.base_module = Module.init(self);
-        const width = @divExact(planes * base_width, 64);
+        const width = @divExact(planes * base_width, 64) * groups;
         self.conv1 = conv1x1(inplanes, width, 1, options);
         self.bn1 = BatchNorm2D.init(.{ .num_features = width, .tensor_opts = options });
         self.conv2 = conv3x3(width, width, stride, groups, 1, options);
@@ -152,8 +152,8 @@ pub const Bottleneck = struct {
         self.bn3 = BatchNorm2D.init(.{ .num_features = planes * 4, .tensor_opts = options });
         if (stride != 1 or (inplanes != planes * 4)) {
             self.downsample = Sequential.init(options)
-                .add(conv1x1(inplanes, planes * 4, stride, options).base_module)
-                .add(BatchNorm2D.init(.{ .num_features = planes * 4, .tensor_opts = options }).base_module);
+                .add(conv1x1(inplanes, planes * 4, stride, options))
+                .add(BatchNorm2D.init(.{ .num_features = planes * 4, .tensor_opts = options }));
         } else {
             self.downsample = Sequential.init(options);
         }
@@ -162,13 +162,13 @@ pub const Bottleneck = struct {
     }
 
     pub fn reset(self: *Self) void {
-        _ = self.base_module.registerModule("conv1", self.conv1.base_module);
-        _ = self.base_module.registerModule("bn1", self.bn1.base_module);
-        _ = self.base_module.registerModule("conv2", self.conv2.base_module);
-        _ = self.base_module.registerModule("bn2", self.bn2.base_module);
-        _ = self.base_module.registerModule("conv3", self.conv3.base_module);
-        _ = self.base_module.registerModule("bn3", self.bn3.base_module);
-        _ = self.base_module.registerModule("downsample", self.downsample.base_module);
+        _ = self.base_module.registerModule("conv1", self.conv1);
+        _ = self.base_module.registerModule("bn1", self.bn1);
+        _ = self.base_module.registerModule("conv2", self.conv2);
+        _ = self.base_module.registerModule("bn2", self.bn2);
+        _ = self.base_module.registerModule("conv3", self.conv3);
+        _ = self.base_module.registerModule("bn3", self.bn3);
+        _ = self.base_module.registerModule("downsample", self.downsample);
         self.conv1.reset();
         self.bn1.reset();
         self.conv2.reset();
@@ -292,22 +292,19 @@ pub const Resnet = struct {
         self.layer3.deinit();
         self.layer4.deinit();
         self.fc.deinit();
+        torch.global_allocator.destroy(self);
     }
 
     pub fn reset(self: *Self) void {
-        _ = self.base_module.registerModule("conv1", self.conv1.base_module);
-        _ = self.base_module.registerModule("bn1", self.bn1.base_module);
-        _ = self.base_module.registerModule("layer1", self.layer1.base_module);
-        _ = self.base_module.registerModule("layer2", self.layer2.base_module);
-        _ = self.base_module.registerModule("layer3", self.layer3.base_module);
-        _ = self.base_module.registerModule("layer4", self.layer4.base_module);
-        _ = self.base_module.registerModule("fc", self.fc.base_module);
+        _ = self.base_module.registerModule("conv1", self.conv1);
+        _ = self.base_module.registerModule("bn1", self.bn1);
+        _ = self.base_module.registerModule("layer1", self.layer1);
+        _ = self.base_module.registerModule("layer2", self.layer2);
+        _ = self.base_module.registerModule("layer3", self.layer3);
+        _ = self.base_module.registerModule("layer4", self.layer4);
+        _ = self.base_module.registerModule("fc", self.fc);
         self.conv1.reset();
         self.bn1.reset();
-        self.layer1.reset();
-        self.layer2.reset();
-        self.layer3.reset();
-        self.layer4.reset();
         self.fc.reset();
     }
 
@@ -345,14 +342,9 @@ pub const Resnet = struct {
                     1,
                     self.options.tensor_options,
                 );
-                layers = layers.add(blk.base_module);
+                layers = layers.add(blk);
                 for (1..blocks) |_| {
-                    layers = layers.add(BasicBlock.init(
-                        planes,
-                        planes,
-                        1,
-                        self.options.tensor_options,
-                    ).base_module);
+                    layers = layers.add(BasicBlock.init(planes, planes, 1, self.options.tensor_options));
                 }
             },
             .Bottleneck => {
@@ -364,17 +356,10 @@ pub const Resnet = struct {
                     base_width,
                     self.options.tensor_options,
                 );
-                layers = layers.add(blk.base_module);
+                layers = layers.add(blk);
                 const in_channels = planes * 4;
                 for (1..blocks) |_| {
-                    layers = layers.add(Bottleneck.init(
-                        in_channels,
-                        planes,
-                        1,
-                        groups,
-                        base_width,
-                        self.options.tensor_options,
-                    ).base_module);
+                    layers = layers.add(Bottleneck.init(in_channels, planes, 1, groups, base_width, self.options.tensor_options));
                 }
             },
         }

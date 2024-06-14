@@ -2,6 +2,7 @@
 #include <ATen/autocast_mode.h>
 #include <stdexcept>
 #include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/mobile/import_data.h>
@@ -60,6 +61,16 @@ at::Device device_of_int(int d) {
 }
 tensor at_new_tensor() {
   PROTECT(return new torch::Tensor();)
+  return nullptr;
+}
+
+tensor at_new_long(int64_t v) {
+  PROTECT(return new torch::Tensor(torch::tensor(v));)
+  return nullptr;
+}
+
+tensor at_new_double(double v) {
+  PROTECT(return new torch::Tensor(torch::tensor(v));)
   return nullptr;
 }
 

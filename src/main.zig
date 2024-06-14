@@ -9,6 +9,7 @@ const conv = torch.conv;
 const resnet = torch.vision.resnet;
 const alexnet = torch.vision.alexnet;
 const convnext = torch.vision.convnext;
+const densenet = torch.vision.densenet;
 // TODO: Memory Management - Need to find a way to free tensors efficiently
 // NOTE: Every time a tensor is created I need to have a reference to it so that I can free it,
 // so basically my own memory management system, WELL SHIT!! Zig yay
@@ -22,20 +23,11 @@ const convnext = torch.vision.convnext;
 // TODO: Generated Docs - Need to generate docs for the library
 // TODO: Add fallible versions of all the functions (somebody might need them)
 
-pub fn add() void {
-    var size = [_]i64{ 1000, 1000 };
-    for (0..1000) |_| {
-        var a = Tensor.rand(&size, torch.FLOAT_CUDA);
-        defer a.free();
-        _ = a.add(&a);
-    }
-}
-
 pub fn main() !void {
     const cuda_available = torch.Cuda.isAvailable();
     std.debug.print("CUDA available: {}\n", .{cuda_available});
     var size = [_]i64{ 3, 2 };
-    var a = Tensor.rand(&size, torch.FLOAT_CUDA);
+    var a = Tensor.rand(&size, torch.FLOAT_CPU);
     a.print();
     a.select(0, 1).print();
     a.add(&a).print();
@@ -79,19 +71,19 @@ pub fn main() !void {
     var conv2d = conv.Conv2D.init(.{ .in_channels = 3, .out_channels = 3, .kernel_size = [_]i64{ 3, 3 } });
     conv2d.base_module.to(a.device(), a.kind(), false);
     defer conv2d.deinit();
-    const input = Tensor.rand(&[_]i64{ 1, 3, 5, 5 }, torch.FLOAT_CUDA);
+    const input = Tensor.rand(&[_]i64{ 1, 3, 5, 5 }, torch.FLOAT_CPU);
     conv2d.forward(&input).print();
 
     const x = Tensor.rand(&[_]i64{ 1, 3, 224, 224 }, torch.FLOAT_CUDA);
-    // var resnet18 = resnet.resnet50(1000, torch.FLOAT_CUDA);
-    // for (0..100) |_| {
-    //     var nograd = torch.NoGradGuard.init();
-    //     defer nograd.deinit();
-    //     var guard = torch.MemoryGuard.init("resnet18");
-    //     defer guard.deinit();
-    //     _ = resnet18.forward(&x);
-    // }
-    //
+    var resnet18 = resnet.resnet50(1000, torch.FLOAT_CUDA);
+    for (0..100) |_| {
+        var nograd = torch.NoGradGuard.init();
+        defer nograd.deinit();
+        var guard = torch.MemoryGuard.init("resnet18");
+        defer guard.deinit();
+        _ = resnet18.forward(&x);
+    }
+
     // var _alexnet = alexnet.Alexnet.init(1000, torch.FLOAT_CUDA);
     // for (0..100) |_| {
     //     var nograd = torch.NoGradGuard.init();
@@ -100,17 +92,26 @@ pub fn main() !void {
     //     defer guard.deinit();
     //     _ = _alexnet.forward(&x);
     // }
-
-    var _convnext_t = convnext.convnextLarge(1000, torch.FLOAT_CUDA);
-    for (0..100) |_| {
-        var nograd = torch.NoGradGuard.init();
-        defer nograd.deinit();
-        var guard = torch.MemoryGuard.init("convnext");
-        defer guard.deinit();
-        _ = _convnext_t.forward(&x);
-    }
+    //
+    // var _convnext_t = convnext.convnextTiny(1000, torch.FLOAT_CUDA);
+    // for (0..100) |_| {
+    //     var nograd = torch.NoGradGuard.init();
+    //     defer nograd.deinit();
+    //     var guard = torch.MemoryGuard.init("convnext");
+    //     defer guard.deinit();
+    //     _ = _convnext_t.forward(&x);
+    // }
+    //
+    // var _densenet = densenet.densenet169(1000, torch.FLOAT_CUDA);
+    // for (0..100) |_| {
+    //     var nograd = torch.NoGradGuard.init();
+    //     defer nograd.deinit();
+    //     var guard = torch.MemoryGuard.init("densenet");
+    //     defer guard.deinit();
+    //     _ = _densenet.forward(&x);
+    // }
 }
 
-test "leak" {
-    add();
+test "all_tests" {
+    _ = @import("vision/test_models.zig");
 }

@@ -29,12 +29,12 @@ pub const Reduction = enum {
     }
 };
 
-fn ptrList(l: []?Tensor) []*C_tensor {
-    var ret = std.ArrayList(*C_tensor).init(torch.global_allocator);
+fn ptrList(l: []*const Tensor) []C_tensor {
+    var ret = std.ArrayList(C_tensor).init(torch.global_allocator);
     for (l) |x| {
-        ret.append(x.c_tensor);
+        ret.append(x.c_tensor) catch unreachable;
     }
-    return ret.toOwnedSlice();
+    return ret.toOwnedSlice() catch unreachable;
 }
 fn ptrListOpt(l: []Tensor) []*C_tensor {
     return ptrList(l);
@@ -157,6 +157,20 @@ pub const Tensor = struct {
         return Tensor{ .c_tensor = c_tensor };
     }
 
+    pub fn fromLong(v: i64) Tensor {
+        var c_tensor = [1]C_tensor{__c.at_new_long(v)};
+        torch.memory_pool.put(&c_tensor);
+        torch.readAndCleanError();
+        return Tensor{ .c_tensor = c_tensor[0] };
+    }
+
+    pub fn fromFloat(v: f64) Tensor {
+        var c_tensor = [1]C_tensor{__c.at_new_double(v)};
+        torch.memory_pool.put(&c_tensor);
+        torch.readAndCleanError();
+        return Tensor{ .c_tensor = c_tensor[0] };
+    }
+
     pub fn cloneFromPtr(c_tensor: C_tensor) Tensor {
         const tensor = __c.at_shallow_clone(c_tensor);
         torch.memory_pool.put(&.{tensor});
@@ -179,7 +193,7 @@ pub const Tensor = struct {
         var buffer: [10]i64 = undefined;
         __c.at_shape(self.c_tensor, buffer[0..dim_].ptr);
         torch.readAndCleanError();
-        return buffer[0..dim_];
+        return torch.global_allocator.dupe(i64, buffer[0..dim_]) catch unreachable;
     }
 
     pub fn sizeDims(self: *const Tensor, comptime dims: usize) [dims]i64 {
@@ -187,7 +201,7 @@ pub const Tensor = struct {
         if (size_.len != dims) {
             @panic("expected one dim");
         }
-        return size_[0..dims];
+        return size_[0..dims].*;
     }
 
     pub fn stride(self: *const Tensor) ![]i64 {

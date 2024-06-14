@@ -35,7 +35,7 @@ pub fn build(b: *std.Build) void {
     });
     torch_module.addObjectFile(b.path("libtch/libtch.a"));
     torch_module.addIncludePath(b.path("libtch/"));
-    torch_module.addLibraryPath(.{ .path = LIBTORCH_LIB });
+    torch_module.addLibraryPath(.{ .cwd_relative = LIBTORCH_LIB });
     // exe.linkLibC();
     // exe.linkLibCpp();
     torch_module.linkSystemLibrary("pthread", .{});
@@ -44,19 +44,19 @@ pub fn build(b: *std.Build) void {
     torch_module.linkSystemLibrary("rt", .{});
 
     torch_module.addObjectFile(.{
-        .path = "/usr/lib/x86_64-linux-gnu/libstdc++.so.6",
+        .cwd_relative = "/usr/lib/x86_64-linux-gnu/libstdc++.so.6",
     });
     torch_module.addObjectFile(.{
-        .path = "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
+        .cwd_relative = "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
     });
     torch_module.addIncludePath(.{
-        .path = "/usr/lib/gcc/x86_64-linux-gnu/11/include",
+        .cwd_relative = "/usr/lib/gcc/x86_64-linux-gnu/11/include",
     });
     torch_module.addIncludePath(.{
-        .path = "/usr/include/c++/11",
+        .cwd_relative = "/usr/include/c++/11",
     });
     torch_module.addIncludePath(.{
-        .path = "/usr/include/x86_64-linux-gnu/c++/11",
+        .cwd_relative = "/usr/include/x86_64-linux-gnu/c++/11",
     });
 
     const torch_libs = [_][]const u8{
@@ -82,7 +82,7 @@ pub fn build(b: *std.Build) void {
             return;
         };
         torch_module.addObjectFile(.{
-            .path = lib_path,
+            .cwd_relative = lib_path,
         });
     }
 
@@ -91,6 +91,8 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        // .use_llvm = false,
+        // .use_lld = false,
     });
 
     exe.linkLibC();
@@ -102,7 +104,6 @@ pub fn build(b: *std.Build) void {
     const run_cmd = b.addRunArtifact(exe);
 
     run_cmd.step.dependOn(b.getInstallStep());
-
     if (b.args) |args| {
         run_cmd.addArgs(args);
     }

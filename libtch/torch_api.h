@@ -31,6 +31,8 @@ typedef void *ivalue;
 char *get_and_reset_last_err(); // thread-local
 void at_manual_seed(int64_t);
 tensor at_new_tensor();
+tensor at_new_long(int64_t);
+tensor at_new_double(double);
 tensor at_tensor_of_blob(void *data, int64_t *dims, size_t ndims,
                          int64_t *strides, size_t nstrides, int type,
                          int device);

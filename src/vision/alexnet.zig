@@ -37,38 +37,36 @@ pub const Alexnet = struct {
         self.base_module = Module.init(self);
 
         self.features = Sequential.init(options)
-            .add(conv2d(3, 64, 11, 4, 2, options).base_module)
-            .add(Functional(Tensor.relu, .{}).init().base_module)
-            .add(Functional(Tensor.maxPool2d, .{ &.{3}, &.{2}, &.{0}, &.{1}, false }).init().base_module)
-            .add(conv2d(64, 192, 5, 1, 2, options).base_module)
-            .add(Functional(Tensor.relu, .{}).init().base_module)
-            .add(Functional(Tensor.maxPool2d, .{ &.{3}, &.{2}, &.{0}, &.{1}, false }).init().base_module)
-            .add(conv2d(192, 384, 3, 1, 1, options).base_module)
-            .add(Functional(Tensor.relu, .{}).init().base_module)
-            .add(conv2d(384, 256, 3, 1, 1, options).base_module)
-            .add(Functional(Tensor.relu, .{}).init().base_module)
-            .add(conv2d(256, 256, 3, 1, 1, options).base_module)
-            .add(Functional(Tensor.relu, .{}).init().base_module)
-            .add(Functional(Tensor.maxPool2d, .{ &.{3}, &.{2}, &.{0}, &.{1}, false }).init().base_module);
+            .add(conv2d(3, 64, 11, 4, 2, options))
+            .add(Functional(Tensor.relu, .{}).init())
+            .add(Functional(Tensor.maxPool2d, .{ &.{3}, &.{2}, &.{0}, &.{1}, false }).init())
+            .add(conv2d(64, 192, 5, 1, 2, options))
+            .add(Functional(Tensor.relu, .{}).init())
+            .add(Functional(Tensor.maxPool2d, .{ &.{3}, &.{2}, &.{0}, &.{1}, false }).init())
+            .add(conv2d(192, 384, 3, 1, 1, options))
+            .add(Functional(Tensor.relu, .{}).init())
+            .add(conv2d(384, 256, 3, 1, 1, options))
+            .add(Functional(Tensor.relu, .{}).init())
+            .add(conv2d(256, 256, 3, 1, 1, options))
+            .add(Functional(Tensor.relu, .{}).init())
+            .add(Functional(Tensor.maxPool2d, .{ &.{3}, &.{2}, &.{0}, &.{1}, false }).init());
 
         self.classifier = Sequential.init(options)
-            .add(Dropout.init(0.5).base_module)
-            .add(Linear.init(.{ .in_features = 256 * 6 * 6, .out_features = 4096, .tensor_opts = options }).base_module)
-            .add(Functional(Tensor.relu, .{}).init().base_module)
-            .add(Dropout.init(0.5).base_module)
-            .add(Linear.init(.{ .in_features = 4096, .out_features = 4096, .tensor_opts = options }).base_module)
-            .add(Functional(Tensor.relu, .{}).init().base_module)
-            .add(Linear.init(.{ .in_features = 4096, .out_features = num_classes, .tensor_opts = options }).base_module);
+            .add(Dropout.init(0.5))
+            .add(Linear.init(.{ .in_features = 256 * 6 * 6, .out_features = 4096, .tensor_opts = options }))
+            .add(Functional(Tensor.relu, .{}).init())
+            .add(Dropout.init(0.5))
+            .add(Linear.init(.{ .in_features = 4096, .out_features = 4096, .tensor_opts = options }))
+            .add(Functional(Tensor.relu, .{}).init())
+            .add(Linear.init(.{ .in_features = 4096, .out_features = num_classes, .tensor_opts = options }));
 
         self.reset();
         return self;
     }
 
     pub fn reset(self: *Self) void {
-        _ = self.base_module.registerModule("features", self.features.base_module);
-        _ = self.base_module.registerModule("classifier", self.classifier.base_module);
-        self.features.reset();
-        self.classifier.reset();
+        _ = self.base_module.registerModule("features", self.features);
+        _ = self.base_module.registerModule("classifier", self.classifier);
     }
 
     pub fn deinit(self: *Self) void {

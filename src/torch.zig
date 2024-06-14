@@ -17,6 +17,16 @@ pub const vision = struct {
     pub const resnet = @import("vision/resnet.zig");
     pub const alexnet = @import("vision/alexnet.zig");
     pub const convnext = @import("vision/convnext.zig");
+    pub const densenet = @import("vision/densenet.zig");
+    pub const efficientnet = @import("vision/efficientnet.zig");
+    pub const inception = @import("vision/inception.zig");
+    pub const googlenet = @import("vision/googlenet.zig");
+    pub const mnasnet = @import("vision/mnasnet.zig");
+    pub const mobilenetv2 = @import("vision/mobilenet_v2.zig");
+    pub const mobilenetv3 = @import("vision/mobilenet_v3.zig");
+    pub const shufflenetv2 = @import("vision/shufflenet_v2.zig");
+    pub const squeezenet = @import("vision/squeezenet.zig");
+    pub const vgg = @import("vision/vgg.zig");
 };
 // TODO: we don't have the error generating/fallible functions right now, probably need
 // // to add them for usecases where fallback is needed instead of panic
@@ -105,7 +115,7 @@ pub const TensorPool = struct {
             self._init();
         }
         var pool = self.pool.?.getPtr(name) orelse {
-            std.log.err("Pool does not exist, creating it: {}\n", .{name});
+            std.log.warn("Pool does not exist, creating it: {}\n", .{name});
             self.addPool(name);
         };
         pool.append(tensor) catch {
@@ -356,25 +366,25 @@ pub const Scalar = struct {
         return Scalar{ .c_scalar = c.ats_float(v) };
     }
 
-    pub fn toInt(self: Scalar) i64 {
+    pub fn toInt(self: *Scalar) i64 {
         const ret = c.ats_to_int(self.c_scalar);
         readAndCleanError();
         return ret;
     }
 
-    pub fn toFloat(self: Scalar) f64 {
+    pub fn toFloat(self: *Scalar) f64 {
         const ret = c.ats_to_float(self.c_scalar);
         readAndCleanError();
         return ret;
     }
 
-    pub fn toString(self: Scalar) [*c]u8 {
+    pub fn toString(self: *Scalar) [*c]u8 {
         const ret = c.ats_to_string(self.c_scalar);
         readAndCleanError();
         return ret;
     }
 
-    pub fn free(self: Scalar) void {
+    pub fn free(self: *Scalar) void {
         c.ats_free(self.c_scalar);
         readAndCleanError();
     }
