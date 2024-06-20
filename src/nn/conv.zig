@@ -5,7 +5,6 @@ const module = @import("module.zig");
 const nn_init = @import("init.zig");
 const Module = module.Module;
 const utils = torch.utils;
-const ModuleGen = module.ModuleGen;
 
 pub const ConvPaddingMode = enum {
     Zeros,

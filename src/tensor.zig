@@ -261,7 +261,7 @@ pub const Tensor = struct {
     pub fn requiresGrad(self: *const Tensor) bool {
         const ret = __c.at_requires_grad(self.c_tensor);
         torch.readAndCleanError();
-        return ret;
+        return if (ret != 0) true else false;
     }
 
     // pub fn dataPtr(self: *Tensor) *c_void {
@@ -366,7 +366,8 @@ pub const Tensor = struct {
         var size_ = [_]i64{@intCast(data_.len)};
         const kind_ = torch.elementKind(T);
         const c_tensor = __c.at_tensor_of_data(data_.ptr, &size_, 1, kind_.eltSizeInBytes(), kind_.cInt());
-        torch.memory_pool.put(&.{c_tensor});
+        var c_tensors = [_]C_tensor{c_tensor};
+        torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor{ .c_tensor = c_tensor };
     }
@@ -374,6 +375,14 @@ pub const Tensor = struct {
     pub fn free(self: *Tensor) void {
         __c.at_free(self.c_tensor);
         torch.readAndCleanError();
+    }
+
+    pub fn crossEntropyForLogits(self: *const Tensor, targets: *const Tensor) Tensor {
+        return self.logSoftmax(-1, .Float).nllLoss(targets, null, .Mean, -100);
+    }
+
+    pub fn accuracyForLogits(self: *const Tensor, targets: *const Tensor) Tensor {
+        return self.argmax(-1, false).eqTensor(targets).totype(.Float).mean(.Float);
     }
 
     // TODO: finish rest of the functions
@@ -417,7 +426,19 @@ pub const Tensor = struct {
     pub fn toString(self: *const Tensor, lw: i64) []const u8 {
         const s = __c.at_to_string(self.c_tensor, @intCast(lw));
         torch.readAndCleanError();
-        return s;
+        return std.mem.span(s);
+    }
+
+    pub fn toInt(self: *const Tensor) i64 {
+        const ret = __c.at_tensor_item_i64(self.c_tensor);
+        torch.readAndCleanError();
+        return ret;
+    }
+
+    pub fn toFloat(self: *const Tensor) f32 {
+        const ret = __c.at_tensor_item_float(self.c_tensor);
+        torch.readAndCleanError();
+        return ret;
     }
 
     // Generated code starts here
@@ -8998,7 +9019,7 @@ pub const Tensor = struct {
     }
 
     pub fn binaryCrossEntropy(
-        self: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64
+        self: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_binary_cross_entropy(@ptrCast(&c_tensors), self.c_tensor,
@@ -9011,7 +9032,7 @@ pub const Tensor = struct {
     }
 
     pub fn binaryCrossEntropyBackward(
-        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64
+        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_binary_cross_entropy_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -9025,7 +9046,7 @@ pub const Tensor = struct {
     }
 
     pub fn binaryCrossEntropyBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_binary_cross_entropy_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -9040,7 +9061,7 @@ pub const Tensor = struct {
     }
 
     pub fn binaryCrossEntropyOut(
-        self: *const Tensor, out: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64
+        self: *const Tensor, out: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_binary_cross_entropy_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -9054,7 +9075,7 @@ pub const Tensor = struct {
     }
 
     pub fn binaryCrossEntropyWithLogits(
-        self: *const Tensor, target: *const Tensor, weight: ?*const Tensor, pos_weight: ?*const Tensor, reduction: i64
+        self: *const Tensor, target: *const Tensor, weight: ?*const Tensor, pos_weight: ?*const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_binary_cross_entropy_with_logits(@ptrCast(&c_tensors), self.c_tensor,
@@ -9068,7 +9089,7 @@ pub const Tensor = struct {
     }
 
     pub fn binaryCrossEntropyWithLogitsOut(
-        self: *const Tensor, out: *const Tensor, target: *const Tensor, weight: ?*const Tensor, pos_weight: ?*const Tensor, reduction: i64
+        self: *const Tensor, out: *const Tensor, target: *const Tensor, weight: ?*const Tensor, pos_weight: ?*const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_binary_cross_entropy_with_logits_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -11143,7 +11164,7 @@ pub const Tensor = struct {
     }
 
     pub fn cosineEmbeddingLoss(
-        input1: *const Tensor, input2: *const Tensor, target: *const Tensor, margin: f64, reduction: i64
+        input1: *const Tensor, input2: *const Tensor, target: *const Tensor, margin: f64, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cosine_embedding_loss(@ptrCast(&c_tensors), input1.c_tensor,
@@ -11241,7 +11262,7 @@ pub const Tensor = struct {
     }
 
     pub fn crossEntropyLoss(
-        self: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64, label_smoothing: f64
+        self: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: Reduction, ignore_index: i64, label_smoothing: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_cross_entropy_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -11300,7 +11321,7 @@ pub const Tensor = struct {
     }
 
     pub fn ctcLoss(
-        log_probs: *const Tensor, targets: *const Tensor, input_lengths: []const i64, target_lengths: []const i64, blank: i64, reduction: i64, zero_infinity: bool
+        log_probs: *const Tensor, targets: *const Tensor, input_lengths: []const i64, target_lengths: []const i64, blank: i64, reduction: Reduction, zero_infinity: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ctc_loss(@ptrCast(&c_tensors), log_probs.c_tensor,
@@ -11316,7 +11337,7 @@ pub const Tensor = struct {
     }
 
     pub fn ctcLossTensor(
-        log_probs: *const Tensor, targets: *const Tensor, input_lengths: *const Tensor, target_lengths: *const Tensor, blank: i64, reduction: i64, zero_infinity: bool
+        log_probs: *const Tensor, targets: *const Tensor, input_lengths: *const Tensor, target_lengths: *const Tensor, blank: i64, reduction: Reduction, zero_infinity: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_ctc_loss_tensor(@ptrCast(&c_tensors), log_probs.c_tensor,
@@ -16046,7 +16067,7 @@ pub const Tensor = struct {
     }
 
     pub fn hingeEmbeddingLoss(
-        self: *const Tensor, target: *const Tensor, margin: f64, reduction: i64
+        self: *const Tensor, target: *const Tensor, margin: f64, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_hinge_embedding_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -16216,7 +16237,7 @@ pub const Tensor = struct {
     }
 
     pub fn huberLoss(
-        self: *const Tensor, target: *const Tensor, reduction: i64, delta: f64
+        self: *const Tensor, target: *const Tensor, reduction: Reduction, delta: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_huber_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -16229,7 +16250,7 @@ pub const Tensor = struct {
     }
 
     pub fn huberLossBackward(
-        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64, delta: f64
+        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: Reduction, delta: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_huber_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -16243,7 +16264,7 @@ pub const Tensor = struct {
     }
 
     pub fn huberLossBackwardOut(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64, delta: f64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: Reduction, delta: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_huber_loss_backward_out(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -16258,7 +16279,7 @@ pub const Tensor = struct {
     }
 
     pub fn huberLossOut(
-        self: *const Tensor, out: *const Tensor, target: *const Tensor, reduction: i64, delta: f64
+        self: *const Tensor, out: *const Tensor, target: *const Tensor, reduction: Reduction, delta: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_huber_loss_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -17281,7 +17302,7 @@ pub const Tensor = struct {
     }
 
     pub fn klDiv(
-        self: *const Tensor, target: *const Tensor, reduction: i64, log_target: bool
+        self: *const Tensor, target: *const Tensor, reduction: Reduction, log_target: bool
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_kl_div(@ptrCast(&c_tensors), self.c_tensor,
@@ -17345,7 +17366,7 @@ pub const Tensor = struct {
     }
 
     pub fn l1Loss(
-        self: *const Tensor, target: *const Tensor, reduction: i64
+        self: *const Tensor, target: *const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_l1_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -19967,7 +19988,7 @@ pub const Tensor = struct {
     }
 
     pub fn marginRankingLoss(
-        input1: *const Tensor, input2: *const Tensor, target: *const Tensor, margin: f64, reduction: i64
+        input1: *const Tensor, input2: *const Tensor, target: *const Tensor, margin: f64, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_margin_ranking_loss(@ptrCast(&c_tensors), input1.c_tensor,
@@ -21694,7 +21715,7 @@ pub const Tensor = struct {
     }
 
     pub fn mseLoss(
-        self: *const Tensor, target: *const Tensor, reduction: i64
+        self: *const Tensor, target: *const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mse_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -21706,7 +21727,7 @@ pub const Tensor = struct {
     }
 
     pub fn mseLossBackward(
-        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64
+        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mse_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -21719,7 +21740,7 @@ pub const Tensor = struct {
     }
 
     pub fn mseLossBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mse_loss_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -21733,7 +21754,7 @@ pub const Tensor = struct {
     }
 
     pub fn mseLossOut(
-        self: *const Tensor, out: *const Tensor, target: *const Tensor, reduction: i64
+        self: *const Tensor, out: *const Tensor, target: *const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_mse_loss_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -21845,7 +21866,7 @@ pub const Tensor = struct {
     }
 
     pub fn multiMarginLossBackward(
-        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, p: Scalar, margin: Scalar, weight: ?*const Tensor, reduction: i64
+        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, p: Scalar, margin: Scalar, weight: ?*const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multi_margin_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -21861,7 +21882,7 @@ pub const Tensor = struct {
     }
 
     pub fn multiMarginLossBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, p: Scalar, margin: Scalar, weight: ?*const Tensor, reduction: i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, p: Scalar, margin: Scalar, weight: ?*const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multi_margin_loss_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -21878,7 +21899,7 @@ pub const Tensor = struct {
     }
 
     pub fn multilabelMarginLoss(
-        self: *const Tensor, target: *const Tensor, reduction: i64
+        self: *const Tensor, target: *const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multilabel_margin_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -21890,7 +21911,7 @@ pub const Tensor = struct {
     }
 
     pub fn multilabelMarginLossBackward(
-        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64, is_target: *const Tensor
+        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: Reduction, is_target: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multilabel_margin_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -21904,7 +21925,7 @@ pub const Tensor = struct {
     }
 
     pub fn multilabelMarginLossBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64, is_target: *const Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: Reduction, is_target: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multilabel_margin_loss_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -21919,7 +21940,7 @@ pub const Tensor = struct {
     }
 
     pub fn multilabelMarginLossOut(
-        self: *const Tensor, out: *const Tensor, target: *const Tensor, reduction: i64
+        self: *const Tensor, out: *const Tensor, target: *const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_multilabel_margin_loss_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22839,7 +22860,7 @@ pub const Tensor = struct {
     }
 
     pub fn nllLoss(
-        self: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64
+        self: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: Reduction, ignore_index: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nll_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -22853,7 +22874,7 @@ pub const Tensor = struct {
     }
 
     pub fn nllLoss2d(
-        self: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64
+        self: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: Reduction, ignore_index: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nll_loss2d(@ptrCast(&c_tensors), self.c_tensor,
@@ -22867,7 +22888,7 @@ pub const Tensor = struct {
     }
 
     pub fn nllLoss2dBackward(
-        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64, total_weight: *const Tensor
+        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: Reduction, ignore_index: i64, total_weight: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nll_loss2d_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -22883,7 +22904,7 @@ pub const Tensor = struct {
     }
 
     pub fn nllLoss2dBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64, total_weight: *const Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: Reduction, ignore_index: i64, total_weight: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nll_loss2d_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -22900,7 +22921,7 @@ pub const Tensor = struct {
     }
 
     pub fn nllLoss2dOut(
-        self: *const Tensor, out: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64
+        self: *const Tensor, out: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: Reduction, ignore_index: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nll_loss2d_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -22915,7 +22936,7 @@ pub const Tensor = struct {
     }
 
     pub fn nllLossBackward(
-        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64, total_weight: *const Tensor
+        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: Reduction, ignore_index: i64, total_weight: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nll_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -22931,7 +22952,7 @@ pub const Tensor = struct {
     }
 
     pub fn nllLossBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64, total_weight: *const Tensor
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: Reduction, ignore_index: i64, total_weight: *const Tensor
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nll_loss_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -22948,7 +22969,7 @@ pub const Tensor = struct {
     }
 
     pub fn nllLossNd(
-        self: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64
+        self: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: Reduction, ignore_index: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nll_loss_nd(@ptrCast(&c_tensors), self.c_tensor,
@@ -22962,7 +22983,7 @@ pub const Tensor = struct {
     }
 
     pub fn nllLossOut(
-        self: *const Tensor, out: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: i64, ignore_index: i64
+        self: *const Tensor, out: *const Tensor, target: *const Tensor, weight: ?*const Tensor, reduction: Reduction, ignore_index: i64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_nll_loss_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -23601,7 +23622,7 @@ pub const Tensor = struct {
     }
 
     pub fn poissonNllLoss(
-        self: *const Tensor, target: *const Tensor, log_input: bool, full_: bool, eps: f64, reduction: i64
+        self: *const Tensor, target: *const Tensor, log_input: bool, full_: bool, eps: f64, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_poisson_nll_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -27128,7 +27149,7 @@ pub const Tensor = struct {
     }
 
     pub fn smoothL1Loss(
-        self: *const Tensor, target: *const Tensor, reduction: i64, beta: f64
+        self: *const Tensor, target: *const Tensor, reduction: Reduction, beta: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_smooth_l1_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -27141,7 +27162,7 @@ pub const Tensor = struct {
     }
 
     pub fn smoothL1LossBackward(
-        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64, beta: f64
+        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: Reduction, beta: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_smooth_l1_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -27155,7 +27176,7 @@ pub const Tensor = struct {
     }
 
     pub fn smoothL1LossBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64, beta: f64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: Reduction, beta: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_smooth_l1_loss_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -27170,7 +27191,7 @@ pub const Tensor = struct {
     }
 
     pub fn smoothL1LossOut(
-        self: *const Tensor, out: *const Tensor, target: *const Tensor, reduction: i64, beta: f64
+        self: *const Tensor, out: *const Tensor, target: *const Tensor, reduction: Reduction, beta: f64
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_smooth_l1_loss_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -27184,7 +27205,7 @@ pub const Tensor = struct {
     }
 
     pub fn softMarginLoss(
-        self: *const Tensor, target: *const Tensor, reduction: i64
+        self: *const Tensor, target: *const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_soft_margin_loss(@ptrCast(&c_tensors), self.c_tensor,
@@ -27196,7 +27217,7 @@ pub const Tensor = struct {
     }
 
     pub fn softMarginLossBackward(
-        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64
+        self: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_soft_margin_loss_backward(@ptrCast(&c_tensors), grad_output.c_tensor,
@@ -27209,7 +27230,7 @@ pub const Tensor = struct {
     }
 
     pub fn softMarginLossBackwardGradInput(
-        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: i64
+        self: *const Tensor, grad_input: *const Tensor, grad_output: *const Tensor, target: *const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_soft_margin_loss_backward_grad_input(@ptrCast(&c_tensors), grad_input.c_tensor,
@@ -27223,7 +27244,7 @@ pub const Tensor = struct {
     }
 
     pub fn softMarginLossOut(
-        self: *const Tensor, out: *const Tensor, target: *const Tensor, reduction: i64
+        self: *const Tensor, out: *const Tensor, target: *const Tensor, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_soft_margin_loss_out(@ptrCast(&c_tensors), out.c_tensor,
@@ -31185,7 +31206,7 @@ pub const Tensor = struct {
     }
 
     pub fn tripletMarginLoss(
-        anchor: *const Tensor, positive_: *const Tensor, negative_: *const Tensor, margin: f64, p: f64, eps: f64, swap: bool, reduction: i64
+        anchor: *const Tensor, positive_: *const Tensor, negative_: *const Tensor, margin: f64, p: f64, eps: f64, swap: bool, reduction: Reduction
     ) Tensor {
         var c_tensors = [_]C_tensor{null} ** 1;
         __c.atg_triplet_margin_loss(@ptrCast(&c_tensors), anchor.c_tensor,

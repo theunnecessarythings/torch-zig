@@ -618,7 +618,7 @@ module Func = struct
           | Bool -> "bool"
           | Layout -> "Layout"
           | LayoutOption -> "?Layout"
-          | Int64 -> "i64"
+          | Int64 -> if String.( = ) arg.arg_name "reduction" then "Reduction" else "i64"
           | Double -> "f64"
           | Tensor -> "*const Tensor"
           | TensorOption -> "?*const Tensor"

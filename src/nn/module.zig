@@ -71,7 +71,7 @@ pub const Module = struct {
         return @typeName(@TypeOf(self));
     }
 
-    pub fn parameters(self: *const Module, recurse: bool) []Tensor {
+    pub fn parameters(self: *Module, recurse: bool) []Tensor {
         return self.namedParameters(recurse).values();
     }
 

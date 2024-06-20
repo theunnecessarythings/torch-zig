@@ -1,5 +1,5 @@
 const std = @import("std");
-const c = @cImport({
+pub const c = @cImport({
     @cInclude("stddef.h");
     @cInclude("stdbool.h");
     @cInclude("stdlib.h");
@@ -43,7 +43,6 @@ pub const INT64_CUDA = TensorOptions{ .kind = Kind.Int64, .device = .{ .Cuda = 0
 
 pub var global_allocator: std.mem.Allocator = std.heap.raw_c_allocator;
 
-pub var grad_enabled: bool = true;
 pub var memory_pool: TensorPool = TensorPool{};
 
 pub fn setGlobalAllocator(allocator: std.mem.Allocator) void {
@@ -166,7 +165,7 @@ pub const Device = union(enum) {
 
     pub fn cudaIfAvailable() Device {
         if (Cuda.isAvailable()) {
-            return Device.Cuda(0);
+            return .{ .Cuda = 0 };
         } else {
             return Device.Cpu;
         }
@@ -622,7 +621,14 @@ pub const COptimizer = struct {
         return COptimizer{ .c_optimizer = ret };
     }
 
-    pub fn addParameters(self: *COptimizer, parameters: *Tensor, group: usize) void {
+    pub fn addParameters(self: *COptimizer, parameters: []Tensor, group: usize) void {
+        for (parameters) |*parameter| {
+            c.ato_add_parameters(self.c_optimizer, parameter.c_tensor, group);
+            readAndCleanError();
+        }
+    }
+
+    pub fn addParameter(self: *COptimizer, parameters: *Tensor, group: usize) void {
         c.ato_add_parameters(self.c_optimizer, parameters.c_tensor, group);
         readAndCleanError();
     }
@@ -692,17 +698,20 @@ pub const MemoryGuard = struct {
 
 pub const NoGradGuard = struct {
     original_state: bool,
+
+    var global_state: bool = true;
+
     pub fn init() NoGradGuard {
         gradSetEnabled(false);
-        grad_enabled = false;
+        defer global_state = false;
         return NoGradGuard{
-            .original_state = grad_enabled,
+            .original_state = global_state,
         };
     }
 
     pub fn deinit(self: NoGradGuard) void {
         gradSetEnabled(self.original_state);
-        grad_enabled = self.original_state;
+        global_state = self.original_state;
     }
 };
 

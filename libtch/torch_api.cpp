@@ -59,6 +59,7 @@ at::Device device_of_int(int d) {
     return at::Device(at::kCPU);
   return at::Device(at::kCUDA, /*index=*/d);
 }
+
 tensor at_new_tensor() {
   PROTECT(return new torch::Tensor();)
   return nullptr;
@@ -72,6 +73,16 @@ tensor at_new_long(int64_t v) {
 tensor at_new_double(double v) {
   PROTECT(return new torch::Tensor(torch::tensor(v));)
   return nullptr;
+}
+
+float at_tensor_item_float(tensor t) {
+  PROTECT(return t->item<float>();)
+  return 0;
+}
+
+int64_t at_tensor_item_int64(tensor t) {
+  PROTECT(return t->item<int64_t>();)
+  return 0;
 }
 
 tensor at_tensor_of_blob(void *data, int64_t *dims, size_t ndims,

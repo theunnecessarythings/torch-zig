@@ -28,16 +28,15 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const torch_module = b.addModule("torch", .{
-        // .name = "torch",
         .root_source_file = b.path("src/torch.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
+        .link_libcpp = true,
     });
     torch_module.addObjectFile(b.path("libtch/libtch.a"));
     torch_module.addIncludePath(b.path("libtch/"));
     torch_module.addLibraryPath(.{ .cwd_relative = LIBTORCH_LIB });
-    // exe.linkLibC();
-    // exe.linkLibCpp();
     torch_module.linkSystemLibrary("pthread", .{});
     torch_module.linkSystemLibrary("m", .{});
     torch_module.linkSystemLibrary("dl", .{});
@@ -123,4 +122,22 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_exe_unit_tests.step);
+
+    const example_option = b.option([]const u8, "example", "Run example") orelse return;
+    const options = b.addOptions();
+    options.addOption([]const u8, "example", example_option);
+
+    const example = b.addExecutable(.{
+        .name = "mnist",
+        .root_source_file = .{ .cwd_relative = std.fmt.allocPrint(b.allocator, "examples/{s}.zig", .{example_option}) catch unreachable },
+        .target = target,
+        .optimize = optimize,
+    });
+    example.linkLibC();
+    example.addIncludePath(b.path("libtch/"));
+    example.root_module.addImport("torch", torch_module);
+    b.installArtifact(example);
+    const example_run = b.addRunArtifact(example);
+    const example_step = b.step("example", "Run example");
+    example_step.dependOn(&example_run.step);
 }

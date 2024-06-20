@@ -261,7 +261,7 @@ pub const Tensor = struct {
     pub fn requiresGrad(self: *const Tensor) bool {
         const ret = __c.at_requires_grad(self.c_tensor);
         torch.readAndCleanError();
-        return ret;
+        return if (ret != 0) true else false;
     }
 
     // pub fn dataPtr(self: *Tensor) *c_void {
@@ -366,7 +366,8 @@ pub const Tensor = struct {
         var size_ = [_]i64{@intCast(data_.len)};
         const kind_ = torch.elementKind(T);
         const c_tensor = __c.at_tensor_of_data(data_.ptr, &size_, 1, kind_.eltSizeInBytes(), kind_.cInt());
-        torch.memory_pool.put(&.{c_tensor});
+        var c_tensors = [_]C_tensor{c_tensor};
+        torch.memory_pool.put(&c_tensors);
         torch.readAndCleanError();
         return Tensor{ .c_tensor = c_tensor };
     }
@@ -374,6 +375,14 @@ pub const Tensor = struct {
     pub fn free(self: *Tensor) void {
         __c.at_free(self.c_tensor);
         torch.readAndCleanError();
+    }
+
+    pub fn crossEntropyForLogits(self: *const Tensor, targets: *const Tensor) Tensor {
+        return self.logSoftmax(-1, .Float).nllLoss(targets, null, .Mean, -100);
+    }
+
+    pub fn accuracyForLogits(self: *const Tensor, targets: *const Tensor) Tensor {
+        return self.argmax(-1, false).eqTensor(targets).totype(.Float).mean(.Float);
     }
 
     // TODO: finish rest of the functions
@@ -417,6 +426,18 @@ pub const Tensor = struct {
     pub fn toString(self: *const Tensor, lw: i64) []const u8 {
         const s = __c.at_to_string(self.c_tensor, @intCast(lw));
         torch.readAndCleanError();
-        return s;
+        return std.mem.span(s);
+    }
+
+    pub fn toInt(self: *const Tensor) i64 {
+        const ret = __c.at_tensor_item_i64(self.c_tensor);
+        torch.readAndCleanError();
+        return ret;
+    }
+
+    pub fn toFloat(self: *const Tensor) f32 {
+        const ret = __c.at_tensor_item_float(self.c_tensor);
+        torch.readAndCleanError();
+        return ret;
     }
 };

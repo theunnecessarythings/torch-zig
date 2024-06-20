@@ -24,6 +24,8 @@ const densenet = torch.vision.densenet;
 // TODO: Add fallible versions of all the functions (somebody might need them)
 
 pub fn main() !void {
+    const te = 1 +| 2;
+    std.debug.print("{}\n", .{te});
     const cuda_available = torch.Cuda.isAvailable();
     std.debug.print("CUDA available: {}\n", .{cuda_available});
     var size = [_]i64{ 3, 2 };
