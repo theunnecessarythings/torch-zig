@@ -7,3 +7,4 @@ libtch/*.o
 libtch/*.a
 gen/_build
 gen/*.rs
+examples/mnist/
