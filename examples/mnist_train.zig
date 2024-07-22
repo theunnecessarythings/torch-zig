@@ -79,7 +79,7 @@ const Net = struct {
     const Self = @This();
 
     pub fn init(options: torch.TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch torch.utils.err(.AllocFailed);
         self.* = Self{};
         self.base_module = Module.init(self);
         self.conv1 = Conv2D.init(.{ .in_channels = 1, .out_channels = 10, .kernel_size = .{ 5, 5 }, .tensor_opts = options });

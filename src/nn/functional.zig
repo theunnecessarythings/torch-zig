@@ -4,6 +4,7 @@ const Tensor = torch.Tensor;
 const TensorOptions = torch.TensorOptions;
 const module = torch.module;
 const Module = module.Module;
+const err = torch.utils.err;
 
 pub fn Functional(comptime func: anytype, comptime args: anytype) type {
     return struct {
@@ -12,7 +13,7 @@ pub fn Functional(comptime func: anytype, comptime args: anytype) type {
         pub const Self = @This();
 
         pub fn init() *Self {
-            var self = torch.global_allocator.create(Self) catch unreachable;
+            var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
             self.* = Self{};
             self.base_module = Module.init(self);
             self.reset();
@@ -42,7 +43,7 @@ pub const Dropout = struct {
     pub const Self = @This();
 
     pub fn init(p: f32) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{
             .p = p,
         };

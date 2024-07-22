@@ -1,5 +1,6 @@
 const torch = @import("../torch.zig");
 const std = @import("std");
+const err = torch.utils.err;
 const Tensor = torch.Tensor;
 const Scalar = torch.Scalar;
 const TensorOptions = torch.TensorOptions;
@@ -55,7 +56,7 @@ const InceptionA = struct {
     const Self = @This();
 
     pub fn init(c_in: i64, pool_feats: i64, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{};
         self.base_module = Module.init(self);
         self.branch1x1 = basicConv2d(c_in, 64, 1, 1, 0, options);
@@ -110,7 +111,7 @@ const InceptionB = struct {
     const Self = @This();
 
     pub fn init(c_in: i64, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{};
         self.base_module = Module.init(self);
         self.branch3x3 = basicConv2d(c_in, 384, 3, 2, 0, options);
@@ -161,7 +162,7 @@ const InceptionC = struct {
     const Self = @This();
 
     pub fn init(c_in: i64, channels_7x7: i64, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{};
         self.base_module = Module.init(self);
         self.branch1x1 = basicConv2d(c_in, 192, 1, 1, 0, options);
@@ -228,7 +229,7 @@ const InceptionD = struct {
     const Self = @This();
 
     pub fn init(c_in: i64, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{};
         self.base_module = Module.init(self);
         self.branch3x3_1 = basicConv2d(c_in, 192, 1, 1, 0, options);
@@ -284,7 +285,7 @@ const InceptionE = struct {
     const Self = @This();
 
     pub fn init(c_in: i64, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{};
         self.base_module = Module.init(self);
         self.branch1x1 = basicConv2d(c_in, 320, 1, 1, 0, options);
@@ -350,7 +351,7 @@ const InceptionAux = struct {
     const Self = @This();
 
     pub fn init(c_in: i64, num_classes: i64, aux: bool, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{ .aux = aux };
         self.base_module = Module.init(self);
         self.conv0 = basicConv2d(c_in, 128, 1, 1, 0, options);

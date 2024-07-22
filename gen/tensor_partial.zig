@@ -7,6 +7,7 @@ const __c = @cImport({
 });
 const std = @import("std");
 const torch = @import("torch.zig");
+const err = torch.utils.err;
 const TchError = torch.TchError;
 const TensorOptions = torch.TensorOptions;
 const Device = torch.Device;
@@ -29,15 +30,23 @@ pub const Reduction = enum {
     }
 };
 
+fn ptrListOpt(l: []?*const Tensor) []C_tensor {
+    var ret = std.ArrayList(C_tensor).init(torch.global_allocator);
+    for (l) |x| {
+        if (x == null) {
+            ret.append(null) catch err(.AllocFailed);
+            continue;
+        }
+        ret.append(x.?.c_tensor) catch err(.AllocFailed);
+    }
+    return ret.toOwnedSlice() catch err(.AllocFailed);
+}
 fn ptrList(l: []*const Tensor) []C_tensor {
     var ret = std.ArrayList(C_tensor).init(torch.global_allocator);
     for (l) |x| {
-        ret.append(x.c_tensor) catch unreachable;
+        ret.append(x.c_tensor) catch err(.AllocFailed);
     }
-    return ret.toOwnedSlice() catch unreachable;
-}
-fn ptrListOpt(l: []Tensor) []*C_tensor {
-    return ptrList(l);
+    return ret.toOwnedSlice() catch err(.AllocFailed);
 }
 
 pub const TensorIndexer = union(enum) {
@@ -81,7 +90,7 @@ pub const Tensor = struct {
                     @panic("unsupported index spec type");
                 },
             };
-            specs.append(spec_) catch unreachable;
+            specs.append(spec_) catch err(.AllocFailed);
         }
         return self.indexer(specs.items);
     }
@@ -193,7 +202,7 @@ pub const Tensor = struct {
         var buffer: [10]i64 = undefined;
         __c.at_shape(self.c_tensor, buffer[0..dim_].ptr);
         torch.readAndCleanError();
-        return torch.global_allocator.dupe(i64, buffer[0..dim_]) catch unreachable;
+        return torch.global_allocator.dupe(i64, buffer[0..dim_]) catch err(.AllocFailed);
     }
 
     pub fn sizeDims(self: *const Tensor, comptime dims: usize) [dims]i64 {
@@ -396,8 +405,9 @@ pub const Tensor = struct {
     }
 
     pub fn get(self: *const Tensor, idx: i64) Tensor {
-        const c_tensor = __c.at_get(self.c_tensor, idx);
-        torch.memory_pool.put(&.{c_tensor});
+        const c_tensor = __c.at_get(self.c_tensor, @intCast(idx));
+        var __t = [_]__c.tensor{c_tensor};
+        torch.memory_pool.put(&__t);
         torch.readAndCleanError();
         return Tensor{ .c_tensor = c_tensor };
     }
@@ -430,7 +440,7 @@ pub const Tensor = struct {
     }
 
     pub fn toInt(self: *const Tensor) i64 {
-        const ret = __c.at_tensor_item_i64(self.c_tensor);
+        const ret = __c.at_tensor_item_int64(self.c_tensor);
         torch.readAndCleanError();
         return ret;
     }

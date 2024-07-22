@@ -7,6 +7,7 @@ const __c = @cImport({
 });
 const std = @import("std");
 const torch = @import("torch.zig");
+const err = torch.utils.err;
 const TchError = torch.TchError;
 const TensorOptions = torch.TensorOptions;
 const Device = torch.Device;
@@ -29,15 +30,23 @@ pub const Reduction = enum {
     }
 };
 
+fn ptrListOpt(l: []?*const Tensor) []C_tensor {
+    var ret = std.ArrayList(C_tensor).init(torch.global_allocator);
+    for (l) |x| {
+        if (x == null) {
+            ret.append(null) catch err(.AllocFailed);
+            continue;
+        }
+        ret.append(x.?.c_tensor) catch err(.AllocFailed);
+    }
+    return ret.toOwnedSlice() catch err(.AllocFailed);
+}
 fn ptrList(l: []*const Tensor) []C_tensor {
     var ret = std.ArrayList(C_tensor).init(torch.global_allocator);
     for (l) |x| {
-        ret.append(x.c_tensor) catch unreachable;
+        ret.append(x.c_tensor) catch err(.AllocFailed);
     }
-    return ret.toOwnedSlice() catch unreachable;
-}
-fn ptrListOpt(l: []Tensor) []*C_tensor {
-    return ptrList(l);
+    return ret.toOwnedSlice() catch err(.AllocFailed);
 }
 
 pub const TensorIndexer = union(enum) {
@@ -81,7 +90,7 @@ pub const Tensor = struct {
                     @panic("unsupported index spec type");
                 },
             };
-            specs.append(spec_) catch unreachable;
+            specs.append(spec_) catch err(.AllocFailed);
         }
         return self.indexer(specs.items);
     }
@@ -193,7 +202,7 @@ pub const Tensor = struct {
         var buffer: [10]i64 = undefined;
         __c.at_shape(self.c_tensor, buffer[0..dim_].ptr);
         torch.readAndCleanError();
-        return torch.global_allocator.dupe(i64, buffer[0..dim_]) catch unreachable;
+        return torch.global_allocator.dupe(i64, buffer[0..dim_]) catch err(.AllocFailed);
     }
 
     pub fn sizeDims(self: *const Tensor, comptime dims: usize) [dims]i64 {
@@ -396,8 +405,9 @@ pub const Tensor = struct {
     }
 
     pub fn get(self: *const Tensor, idx: i64) Tensor {
-        const c_tensor = __c.at_get(self.c_tensor, idx);
-        torch.memory_pool.put(&.{c_tensor});
+        const c_tensor = __c.at_get(self.c_tensor, @intCast(idx));
+        var __t = [_]__c.tensor{c_tensor};
+        torch.memory_pool.put(&__t);
         torch.readAndCleanError();
         return Tensor{ .c_tensor = c_tensor };
     }
@@ -430,7 +440,7 @@ pub const Tensor = struct {
     }
 
     pub fn toInt(self: *const Tensor) i64 {
-        const ret = __c.at_tensor_item_i64(self.c_tensor);
+        const ret = __c.at_tensor_item_int64(self.c_tensor);
         torch.readAndCleanError();
         return ret;
     }
@@ -2829,10 +2839,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn internalHistogramddBinEdgesOut(
@@ -5744,10 +5754,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn internalToDense(
@@ -7518,10 +7528,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn all(
@@ -8413,10 +8423,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn atleast2d(
@@ -8438,10 +8448,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn atleast3d(
@@ -8463,10 +8473,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn avgPool1d(
@@ -9736,10 +9746,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn broadcastTo(
@@ -10142,10 +10152,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn clamp(
@@ -11940,10 +11950,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn dequantizeTensorsOut(
@@ -12564,10 +12574,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn dsplitArray(
@@ -12580,10 +12590,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn dstack(
@@ -16170,10 +16180,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn hsplitArray(
@@ -16186,10 +16196,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn hspmm(
@@ -20704,10 +20714,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn meshgridIndexing(
@@ -20720,10 +20730,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn mh(
@@ -23016,10 +23026,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn nonzeroOut(
@@ -24174,10 +24184,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn quantizePerTensorTensorsOut(
@@ -29654,10 +29664,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn splitCopy(
@@ -29671,10 +29681,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn splitCopyTensorOut(
@@ -29699,10 +29709,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn splitWithSizes(
@@ -29716,10 +29726,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn splitWithSizesCopy(
@@ -29733,10 +29743,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn splitWithSizesCopyOut(
@@ -30589,10 +30599,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn tensorSplitIndices(
@@ -30606,10 +30616,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn tensorSplitTensorIndicesOrSections(
@@ -30623,10 +30633,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn tensordot(
@@ -31390,10 +31400,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn unbindCopy(
@@ -31406,10 +31416,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn unbindCopyIntOut(
@@ -31444,10 +31454,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn unfold(
@@ -31656,10 +31666,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn unsafeSplit(
@@ -31673,10 +31683,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn unsafeSplitTensorOut(
@@ -31701,10 +31711,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn unsafeSplitWithSizesOut(
@@ -32607,10 +32617,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn vsplitArray(
@@ -32623,10 +32633,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn vstack(
@@ -32659,10 +32669,10 @@ pub const Tensor = struct {
         while (true) {
             const c__ = c_tensors[idx];
             if (c__ == null) break;
-            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;
+            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);
             idx += 1;
         }
-        return r__.toOwnedSlice() catch unreachable;
+        return r__.toOwnedSlice() catch err(.AllocFailed);
     }
 
     pub fn whereScalar(

@@ -1053,10 +1053,10 @@ let write_zig_wrapper funcs filename =
         pm "        while (true) {";
         pm "            const c__ = c_tensors[idx];";
         pm "            if (c__ == null) break;";
-        pm "            r__.append(Tensor{ .c_tensor = c__ }) catch unreachable;";
+        pm "            r__.append(Tensor{ .c_tensor = c__ }) catch err(.AllocFailed);";
         pm "            idx += 1;";
         pm "        }";
-        pm "        return r__.toOwnedSlice() catch unreachable;";
+        pm "        return r__.toOwnedSlice() catch err(.AllocFailed);";
         pm "    }"
       | `nothing ->
         pm "        __c.atg_%s(%s);" exported_name (Func.zig_binding_args func ~self);

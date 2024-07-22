@@ -53,6 +53,17 @@ models = {
     "vgg16_bn": models.vgg16_bn,
     "vgg19": models.vgg19,
     "vgg19_bn": models.vgg19_bn,
+    "vit_b_16": models.vit_b_16,
+    "vit_b_32": models.vit_b_32,
+    "vit_l_16": models.vit_l_16,
+    "vit_l_32": models.vit_l_32,
+    "vit_h_14": models.vit_h_14,
+    "swin_t": models.swin_t,
+    "swin_s": models.swin_s,
+    "swin_b": models.swin_b,
+    "swin_v2_t": models.swin_v2_t,
+    "swin_v2_s": models.swin_v2_s,
+    "swin_v2_b": models.swin_v2_b,
 }
 
 param_dict = []

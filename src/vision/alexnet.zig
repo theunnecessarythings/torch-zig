@@ -32,7 +32,7 @@ pub const Alexnet = struct {
     const Self = @This();
 
     pub fn init(num_classes: i64, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch torch.utils.err(.AllocFailed);
         self.* = Self{};
         self.base_module = Module.init(self);
 

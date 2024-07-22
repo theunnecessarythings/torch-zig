@@ -28,7 +28,7 @@ const InvertedResidual = struct {
         bn_momentum: f64,
         options: TensorOptions,
     ) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch torch.utils.err(.AllocFailed);
         self.* = Self{ .apply_residual = c_in == c_out and stride == 1 };
         self.base_module = Module.init(self);
         const mid_ch = c_in * expansion_factor;

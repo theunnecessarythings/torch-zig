@@ -23,7 +23,7 @@ const Fire = struct {
     const Self = @This();
 
     pub fn init(c_in: i64, c_squeeze: i64, c_expand1x1: i64, c_expand3x3: i64, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch torch.utils.err(.AllocFailed);
         self.* = Self{};
         self.squeeze = Conv2D.init(.{ .in_channels = c_in, .out_channels = c_squeeze, .kernel_size = .{ 1, 1 }, .tensor_opts = options });
         self.expand1x1 = Conv2D.init(.{ .in_channels = c_squeeze, .out_channels = c_expand1x1, .kernel_size = .{ 1, 1 }, .tensor_opts = options });
@@ -34,9 +34,6 @@ const Fire = struct {
     }
 
     pub fn reset(self: *Self) void {
-        self.squeeze.reset();
-        self.expand1x1.reset();
-        self.expand3x3.reset();
         _ = self.base_module.registerModule("squeeze", self.squeeze);
         _ = self.base_module.registerModule("expand1x1", self.expand1x1);
         _ = self.base_module.registerModule("expand3x3", self.expand3x3);

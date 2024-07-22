@@ -1,6 +1,9 @@
 #include "torch_api.h"
 #include <ATen/autocast_mode.h>
+#include <ATen/core/ivalue.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <stdexcept>
+#include <torch/csrc/api/include/torch/serialize.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
@@ -84,6 +87,14 @@ int64_t at_tensor_item_int64(tensor t) {
   PROTECT(return t->item<int64_t>();)
   return 0;
 }
+
+ivalue at_torch_load(char *data, size_t len) {
+  std::vector<char> v(data, data + len);
+  PROTECT(return new c10::IValue(torch::pickle_load(v));)
+  return 0;
+}
+
+void empty_cache() { PROTECT(at::cuda::CUDACachingAllocator::emptyCache();) }
 
 tensor at_tensor_of_blob(void *data, int64_t *dims, size_t ndims,
                          int64_t *strides, size_t nstrides, int type,

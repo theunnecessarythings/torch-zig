@@ -1,5 +1,6 @@
 const torch = @import("../torch.zig");
 const std = @import("std");
+const err = torch.utils.err;
 const Tensor = torch.Tensor;
 const Scalar = torch.Scalar;
 const TensorOptions = torch.TensorOptions;
@@ -24,7 +25,7 @@ const DenseLayer = struct {
     const Self = @This();
 
     pub fn init(c_in: i64, bn_size: i64, growth: i64, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{
             .options = options,
         };
@@ -59,19 +60,15 @@ const DenseLayer = struct {
         _ = self.base_module.registerModule("conv1", self.conv1);
         _ = self.base_module.registerModule("norm2", self.bn2);
         _ = self.base_module.registerModule("conv2", self.conv2);
-        self.bn1.reset();
-        self.conv1.reset();
-        self.bn2.reset();
-        self.conv2.reset();
     }
 
     pub fn deinit(self: *Self) void {
         self.base_module.deinit();
-        self.bn1.deinit();
-        self.conv1.deinit();
-        self.bn2.deinit();
-        self.conv2.deinit();
-        torch.global_allocator.deallocate(self);
+        // self.bn1.deinit();
+        // self.conv1.deinit();
+        // self.bn2.deinit();
+        // self.conv2.deinit();
+        torch.global_allocator.destroy(self);
     }
 
     pub fn forward(self: *Self, x: *const Tensor) Tensor {
@@ -91,12 +88,12 @@ const DenseBlock = struct {
     const Self = @This();
 
     pub fn init(c_in: i64, bn_size: i64, growth: i64, nlayers: i64, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{
             .options = options,
             .layers = std.ArrayList(*DenseLayer).init(torch.global_allocator),
         };
-        self.layers.resize(@intCast(nlayers)) catch unreachable;
+        self.layers.resize(@intCast(nlayers)) catch err(.AllocFailed);
         self.base_module = Module.init(self);
         for (0..@intCast(nlayers)) |i| {
             self.layers.items[i] = DenseLayer.init(c_in + @as(i64, @intCast(i)) * growth, bn_size, growth, options);
@@ -107,9 +104,8 @@ const DenseBlock = struct {
 
     pub fn reset(self: *Self) void {
         for (0..self.layers.items.len) |i| {
-            const name = std.fmt.allocPrint(torch.global_allocator, "denselayer{d}", .{i + 1}) catch unreachable;
+            const name = std.fmt.allocPrint(torch.global_allocator, "denselayer{d}", .{i + 1}) catch err(.AllocFailed);
             _ = self.base_module.registerModule(name, self.layers.items[i]);
-            self.layers.items[i].reset();
         }
     }
 
@@ -125,7 +121,7 @@ const DenseBlock = struct {
     pub fn forward(self: *Self, x: *const Tensor) Tensor {
         var features = std.ArrayList(*Tensor).init(torch.global_allocator);
         defer features.deinit();
-        features.resize(self.layers.items.len + 1) catch unreachable;
+        features.resize(self.layers.items.len + 1) catch err(.AllocFailed);
         features.items[0] = @constCast(x);
         for (0..self.layers.items.len) |i| {
             var ys = self.layers.items[i].forward(&Tensor.cat(features.items[0..(i + 1)], 1));
@@ -159,7 +155,7 @@ const DenseNet = struct {
 
     const Self = @This();
     pub fn init(c_in: i64, bn_size: i64, growth: i64, block_config: []const i64, c_out: i64, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{};
         self.base_module = Module.init(self);
         self.features = Sequential.init(options)
@@ -177,11 +173,11 @@ const DenseNet = struct {
             .add(Functional(Tensor.maxPool2d, .{ &.{ 3, 3 }, &.{ 2, 2 }, &.{ 1, 1 }, &.{ 1, 1 }, false }).init());
         var nfeat = c_in;
         for (block_config, 0..) |nlayers, i| {
-            const name = std.fmt.allocPrint(torch.global_allocator, "denseblock{d}", .{i + 1}) catch unreachable;
+            const name = std.fmt.allocPrint(torch.global_allocator, "denseblock{d}", .{i + 1}) catch err(.AllocFailed);
             self.features = self.features.addWithName(name, DenseBlock.init(nfeat, bn_size, growth, nlayers, options));
             nfeat += nlayers * growth;
             if (i + 1 != block_config.len) {
-                const layer_name = std.fmt.allocPrint(torch.global_allocator, "transition{d}", .{i + 1}) catch unreachable;
+                const layer_name = std.fmt.allocPrint(torch.global_allocator, "transition{d}", .{i + 1}) catch err(.AllocFailed);
                 self.features = self.features.addWithName(layer_name, transition(nfeat, @divFloor(nfeat, 2), options));
                 nfeat = @divFloor(nfeat, 2);
             }
@@ -202,7 +198,7 @@ const DenseNet = struct {
 
     pub fn deinit(self: *Self) void {
         self.features.deinit();
-        self.classifier.deinit();
+        // self.classifier.deinit();
         self.base_module.deinit();
         torch.global_allocator.destroy(self);
     }

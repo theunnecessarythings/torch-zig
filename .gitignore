@@ -1,5 +1,8 @@
 zig-cache
 zig-out
 .zig-cache
+.cache
 libtch/CMakeFiles
+libtch/*.o
+libtch/*.a
 gen/_build

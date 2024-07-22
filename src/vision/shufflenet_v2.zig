@@ -1,5 +1,6 @@
 const torch = @import("../torch.zig");
 const std = @import("std");
+const err = torch.utils.err;
 const Tensor = torch.Tensor;
 const Scalar = torch.Scalar;
 const TensorOptions = torch.TensorOptions;
@@ -35,7 +36,7 @@ const InvertedResidual = struct {
     const Self = @This();
 
     pub fn init(c_in: i64, c_out: i64, stride: i64, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{ .stride = stride };
         self.base_module = Module.init(self);
         self.branch1 = Sequential.init(options);
@@ -96,7 +97,7 @@ const ShuffleNetV2 = struct {
     const Self = @This();
 
     fn init(stages_repeats: []const i64, stages_c_out: []const i64, num_classes: i64, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{};
         self.base_module = Module.init(self);
         var c_in: i64 = 3;
@@ -137,10 +138,12 @@ const ShuffleNetV2 = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.conv1.deinit();
-        self.stages.deinit();
-        self.conv5.deinit();
-        self.fc.deinit();
+        // self.conv1.deinit();
+        self.stages[0].deinit();
+        self.stages[1].deinit();
+        self.stages[2].deinit();
+        // self.conv5.deinit();
+        // self.fc.deinit();
         self.base_module.deinit();
         torch.global_allocator.destroy(self);
     }

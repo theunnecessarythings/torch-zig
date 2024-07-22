@@ -1,5 +1,6 @@
 const torch = @import("../torch.zig");
 const std = @import("std");
+const err = torch.utils.err;
 const Tensor = torch.Tensor;
 const Scalar = torch.Scalar;
 const TensorOptions = torch.TensorOptions;
@@ -28,7 +29,7 @@ pub const StochasticDepth = struct {
     const Self = @This();
 
     pub fn init(prob: f64, kind: StochasticDepthKind, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{
             .prob = prob,
             .kind = kind,
@@ -47,11 +48,11 @@ pub const StochasticDepth = struct {
         defer size.deinit();
         switch (self.kind) {
             .Row => {
-                size.append(input.size()[0]) catch unreachable;
-                size.appendNTimes(1, input.dim() - 1) catch unreachable;
+                size.append(input.size()[0]) catch err(.AllocFailed);
+                size.appendNTimes(1, input.dim() - 1) catch err(.AllocFailed);
             },
             .Batch => {
-                size.appendNTimes(1, input.dim()) catch unreachable;
+                size.appendNTimes(1, input.dim()) catch err(.AllocFailed);
             },
         }
         var noise = Tensor.rand(size.items, self.tensor_opts);
@@ -77,7 +78,7 @@ pub const CNBlock = struct {
     const Self = @This();
 
     pub fn init(dim: i64, layer_scale: f64, stochastic_depth_prob: f64, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{ .tensor_opts = options };
         self.base_module = Module.init(self);
 
@@ -87,7 +88,7 @@ pub const CNBlock = struct {
             true,
         );
         self.stoch_depth = StochasticDepth.init(stochastic_depth_prob, StochasticDepthKind.Row, options);
-        const norm_shape = torch.global_allocator.dupe(i64, &.{dim}) catch unreachable;
+        const norm_shape = torch.global_allocator.dupe(i64, &.{dim}) catch err(.AllocFailed);
         self.block = Sequential.init(options)
             .add(Conv2D.init(
             .{
@@ -131,7 +132,7 @@ pub const CNBlock = struct {
 };
 
 fn convNorm(c_in: i64, c_out: i64, ksize: i64, stride: i64, padding: i64, options: TensorOptions) *Sequential {
-    const norm_shape = torch.global_allocator.dupe(i64, &.{c_out}) catch unreachable;
+    const norm_shape = torch.global_allocator.dupe(i64, &.{c_out}) catch err(.AllocFailed);
     const seq = Sequential.init(options)
         .add(Conv2D.init(.{
         .in_channels = c_in,
@@ -157,7 +158,7 @@ pub const ConvNext = struct {
     const Self = @This();
 
     pub fn init(block_setting: [4][3]i64, stochastic_depth_prob: f64, layer_scale: f64, num_classes: i64, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{
             .tensor_opts = options,
         };
@@ -182,7 +183,7 @@ pub const ConvNext = struct {
             }
             self.features = self.features.add(stage);
             if (c_out != -1) {
-                const norm_shape = torch.global_allocator.dupe(i64, &.{c_in}) catch unreachable;
+                const norm_shape = torch.global_allocator.dupe(i64, &.{c_in}) catch err(.AllocFailed);
                 self.features = self.features.add(
                     Sequential.init(options)
                         .add(Functional(Tensor.permute, .{&.{ 0, 2, 3, 1 }}).init())
@@ -200,7 +201,7 @@ pub const ConvNext = struct {
         }
         const lastblock = block_setting[block_setting.len - 1];
         const lastconv_c_out = if (lastblock[1] != -1) lastblock[1] else lastblock[0];
-        const norm_shape = torch.global_allocator.dupe(i64, &.{lastconv_c_out}) catch unreachable;
+        const norm_shape = torch.global_allocator.dupe(i64, &.{lastconv_c_out}) catch err(.AllocFailed);
         self.classifier = Sequential.init(options)
             .add(Functional(Tensor.permute, .{&.{ 0, 2, 3, 1 }}).init())
             .addWithName("0", LayerNorm.init(.{ .normalized_shape = norm_shape, .tensor_opts = options }))

@@ -1,5 +1,6 @@
 const torch = @import("../torch.zig");
 const std = @import("std");
+const err = torch.utils.err;
 const Tensor = torch.Tensor;
 const Scalar = torch.Scalar;
 const TensorOptions = torch.TensorOptions;
@@ -45,7 +46,7 @@ const SqueezeExcitation = struct {
     const Self = @This();
 
     pub fn init(c_in: i64, c_squeeze: i64, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{};
         self.base_module = Module.init(self);
         self.scale = Sequential.init(options)
@@ -92,7 +93,7 @@ fn anyStage(width_in: i64, width_out: i64, stride: i64, depth: i64, group_width:
     for (0..depth) |i| {
         const w_in = if (i == 0) width_in else width_out;
         const s = if (i == 0) stride else 1;
-        const name = std.fmt.allocPrint(torch.global_allocator, "block{d}-{d}", .{ stage_index, i }) catch unreachable;
+        const name = std.fmt.allocPrint(torch.global_allocator, "block{d}-{d}", .{ stage_index, i }) catch err(.AllocFailed);
         layers = layers.addWithName(name, resBottleneckBlock(w_in, width_out, s, group_width, bottleneck_multiplier, se_ratio, options));
     }
     return layers;
@@ -111,30 +112,30 @@ const BlockParams = struct {
         const stride = 2;
         var widths_cont = std.ArrayList(f64).init(torch.global_allocator);
         for (0..depth) |i| {
-            widths_cont.append(i * w_a + w_0) catch unreachable;
+            widths_cont.append(i * w_a + w_0) catch err(.AllocFailed);
         }
         var block_capacity = std.ArrayList(f64).init(torch.global_allocator);
         for (widths_cont) |w| {
-            block_capacity.append(@round(@log(w / w_0) / @log(w_m))) catch unreachable;
+            block_capacity.append(@round(@log(w / w_0) / @log(w_m))) catch err(.AllocFailed);
         }
         var block_widths = std.ArrayList(i64).init(torch.global_allocator);
         for (block_capacity) |c| {
-            block_widths.append(@round(w_0 * std.math.powi(i64, w_m, c) / quant - 1e-6) * quant) catch unreachable;
+            block_widths.append(@round(w_0 * std.math.powi(i64, w_m, c) / quant - 1e-6) * quant) catch err(.AllocFailed);
         }
         var stages = std.AutoArrayHashMap(i64, void).init(torch.global_allocator);
         for (block_widths) |w| {
-            stages.put(w, void{}) catch unreachable;
+            stages.put(w, void{}) catch err(.AllocFailed);
         }
         const num_stages = stages.count();
         var b0 = block_widths.clone();
-        b0.append(0) catch unreachable;
+        b0.append(0) catch err(.AllocFailed);
         var b1 = std.ArrayList(i64).init(torch.global_allocator);
-        b1.append(0) catch unreachable;
-        b1.appendSlice(block_widths.items) catch unreachable;
+        b1.append(0) catch err(.AllocFailed);
+        b1.appendSlice(block_widths.items) catch err(.AllocFailed);
 
         var split_helper = std.ArrayList(struct { i64, i64, i64, i64 }).init(torch.global_allocator);
         for (0..block_widths.items.len + 1) |i| {
-            split_helper.append(.{ b0.items[i], b1.items[i], b0.items[i], b1.items[i] }) catch unreachable;
+            split_helper.append(.{ b0.items[i], b1.items[i], b0.items[i], b1.items[i] }) catch err(.AllocFailed);
         }
     }
 };

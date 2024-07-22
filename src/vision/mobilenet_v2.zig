@@ -45,7 +45,7 @@ const InvertedResidual = struct {
     const Self = @This();
 
     pub fn init(c_in: i64, c_out: i64, stride: i64, expand_ratio: i64, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch torch.utils.err(.AllocFailed);
         self.* = Self{ .use_res_connect = stride == 1 and c_in == c_out };
         self.base_module = Module.init(self);
         const hidden_dim = c_in * expand_ratio;

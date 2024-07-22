@@ -22,11 +22,64 @@ fn findLibtorchLibrary(b: *std.Build, path: []const u8, lib: []const u8) ?[]cons
 }
 
 pub fn build(b: *std.Build) void {
-    const LIBTORCH_LIB = "/home/sreeraj/libtorch/lib";
+    const LIBTORCH = "/home/sreeraj/libtorch";
+    const LIBTORCH_LIB = LIBTORCH ++ "/lib";
+    const CUDA_HOME = "/usr/local/cuda";
+    const CXX_COMPILER = "g++";
+
     const target = b.standardTargetOptions(.{});
 
     const optimize = b.standardOptimizeOption(.{});
 
+    const CXX_FLAGS = [_][]const u8{
+        "-std=c++17",
+        // "-stdlib=libstdc++",
+        "-D_GLIBCXX_USE_CXX11_ABI=1",
+        "-DUSE_C10D_GLOO",
+        "-DUSE_DISTRIBUTED",
+        "-DUSE_RPC",
+        "-DUSE_TENSORPIPE",
+        "-c",
+    };
+
+    const cmd_1 = b.addSystemCommand(&.{CXX_COMPILER});
+    cmd_1.addArgs(&CXX_FLAGS ++ [_][]const u8{
+        "torch_api.cpp",
+        "-o",
+        "torch_api.o",
+        "-I" ++ LIBTORCH ++ "/include/",
+        "-I" ++ LIBTORCH ++ "/include/torch/csrc/api/include/",
+        "-I" ++ CUDA_HOME ++ "/include/",
+    });
+    cmd_1.setCwd(b.path("libtch/"));
+
+    const cmd_2 = b.addSystemCommand(&.{CXX_COMPILER});
+    cmd_2.addArgs(&CXX_FLAGS ++ [_][]const u8{
+        "torch_api_generated.cpp",
+        "-o",
+        "torch_api_generated.o",
+        "-I" ++ LIBTORCH ++ "/include/",
+        "-I" ++ LIBTORCH ++ "/include/torch/csrc/api/include/",
+        "-I" ++ CUDA_HOME ++ "/include/",
+    });
+    cmd_2.setCwd(b.path("libtch/"));
+    cmd_1.step.dependOn(&cmd_2.step);
+    const static_lib_cmd = b.addSystemCommand(&.{
+        "ar",
+        "crs",
+        "libtch/libtch.a",
+        "libtch/torch_api.o",
+        "libtch/torch_api_generated.o",
+    });
+    static_lib_cmd.step.dependOn(&cmd_2.step);
+
+    const build_lib_step = b.step("lib", "Build libtch.a");
+    build_lib_step.dependOn(&static_lib_cmd.step);
+    std.fs.cwd().access("libtch/libtch.a", .{}) catch {
+        std.log.info("libtch not built, build it using `zig build lib`", .{});
+        std.log.info("To force libtch rebuild if changes are made to `torch_api.cpp` or `torch_api_generated.cpp`, run `zig build lib`\n", .{});
+        // b.getInstallStep().dependOn(&static_lib_cmd.step);
+    };
     const torch_module = b.addModule("torch", .{
         .root_source_file = b.path("src/torch.zig"),
         .target = target,
@@ -37,25 +90,8 @@ pub fn build(b: *std.Build) void {
     torch_module.addObjectFile(b.path("libtch/libtch.a"));
     torch_module.addIncludePath(b.path("libtch/"));
     torch_module.addLibraryPath(.{ .cwd_relative = LIBTORCH_LIB });
-    torch_module.linkSystemLibrary("pthread", .{});
-    torch_module.linkSystemLibrary("m", .{});
-    torch_module.linkSystemLibrary("dl", .{});
-    torch_module.linkSystemLibrary("rt", .{});
-
     torch_module.addObjectFile(.{
         .cwd_relative = "/usr/lib/x86_64-linux-gnu/libstdc++.so.6",
-    });
-    torch_module.addObjectFile(.{
-        .cwd_relative = "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
-    });
-    torch_module.addIncludePath(.{
-        .cwd_relative = "/usr/lib/gcc/x86_64-linux-gnu/11/include",
-    });
-    torch_module.addIncludePath(.{
-        .cwd_relative = "/usr/include/c++/11",
-    });
-    torch_module.addIncludePath(.{
-        .cwd_relative = "/usr/include/x86_64-linux-gnu/c++/11",
     });
 
     const torch_libs = [_][]const u8{
@@ -90,11 +126,13 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        // .strip = true,
         // .use_llvm = false,
         // .use_lld = false,
     });
 
     exe.linkLibC();
+    exe.linkLibCpp();
     exe.addIncludePath(b.path("libtch/"));
     exe.root_module.addImport("torch", torch_module);
 

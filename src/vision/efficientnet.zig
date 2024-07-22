@@ -1,5 +1,6 @@
 const torch = @import("../torch.zig");
 const std = @import("std");
+const err = torch.utils.err;
 const Tensor = torch.Tensor;
 const Scalar = torch.Scalar;
 const TensorOptions = torch.TensorOptions;
@@ -113,7 +114,7 @@ const ConvNormActivation = struct {
         activation: bool,
         options: TensorOptions,
     ) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{ .activation = activation, .options = options };
         self.base_module = Module.init(self);
         const padding = @divFloor(ksize - 1, 2);
@@ -135,8 +136,6 @@ const ConvNormActivation = struct {
     pub fn reset(self: *Self) void {
         _ = self.base_module.registerModule("0", self.conv);
         _ = self.base_module.registerModule("1", self.norm);
-        self.conv.reset();
-        self.norm.reset();
     }
 
     pub fn deinit(self: *Self) void {
@@ -163,7 +162,7 @@ const SqueezeExcitation = struct {
     const Self = @This();
 
     pub fn init(c_in: i64, c_squeeze: i64, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{
             .fc1 = Conv2D.init(.{
                 .in_channels = c_in,
@@ -187,8 +186,6 @@ const SqueezeExcitation = struct {
     pub fn reset(self: *Self) void {
         _ = self.base_module.registerModule("fc1", self.fc1);
         _ = self.base_module.registerModule("fc2", self.fc2);
-        self.fc1.reset();
-        self.fc2.reset();
     }
 
     pub fn deinit(self: *Self) void {
@@ -218,7 +215,7 @@ pub const StochasticDepth = struct {
     const Self = @This();
 
     pub fn init(prob: f64, kind: StochasticDepthKind, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{
             .prob = prob,
             .kind = kind,
@@ -237,11 +234,11 @@ pub const StochasticDepth = struct {
         defer size.deinit();
         switch (self.kind) {
             .Row => {
-                size.append(input.size()[0]) catch unreachable;
-                size.appendNTimes(1, input.dim() - 1) catch unreachable;
+                size.append(input.size()[0]) catch err(.AllocFailed);
+                size.appendNTimes(1, input.dim() - 1) catch err(.AllocFailed);
             },
             .Batch => {
-                size.appendNTimes(1, input.dim()) catch unreachable;
+                size.appendNTimes(1, input.dim()) catch err(.AllocFailed);
             },
         }
         var noise = Tensor.rand(size.items, self.tensor_opts);
@@ -267,7 +264,7 @@ const MBConv = struct {
     const Self = @This();
 
     pub fn init(cfg: MBConvConfig, stoch_depth_prob: f64) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{ .cfg = cfg, .block = Sequential.init(cfg.options) };
         self.base_module = Module.init(self);
         const c_expanded = MBConvConfig.adjustChannels(cfg.c_in, cfg.expand_ratio, null);
@@ -328,7 +325,7 @@ const FusedMBConv = struct {
     const Self = @This();
 
     pub fn init(cfg: MBConvConfig, stoch_depth_prob: f64) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{ .cfg = cfg, .block = Sequential.init(cfg.options) };
         self.base_module = Module.init(self);
         const c_expanded = MBConvConfig.adjustChannels(cfg.c_in, cfg.expand_ratio, null);
@@ -336,7 +333,7 @@ const FusedMBConv = struct {
             self.block = self.block.add(ConvNormActivation.init(cfg.c_in, c_expanded, cfg.ksize, cfg.stride, 1, true, cfg.options))
                 .add(ConvNormActivation.init(c_expanded, cfg.c_out, 1, 1, 1, false, cfg.options));
         } else {
-            self.block = self.block.add(ConvNormActivation.init(cfg.c_in, c_expanded, cfg.ksize, cfg.stride, 1, true, cfg.options));
+            self.block = self.block.add(ConvNormActivation.init(cfg.c_in, cfg.c_out, cfg.ksize, cfg.stride, 1, true, cfg.options));
         }
         self.stochastic_depth = StochasticDepth.init(stoch_depth_prob, .Row, cfg.options);
         self.reset();
@@ -374,7 +371,7 @@ const EfficientNet = struct {
     const Self = @This();
 
     pub fn init(cfgs: []const MBConvConfig, dropout: f64, stoch_depth_prob: f64, num_classes: i64, last_channel: ?i64) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{
             .cfgs = cfgs,
             .dropout = dropout,
@@ -422,9 +419,9 @@ const EfficientNet = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.features.deinit();
-        self.classifier.deinit();
         self.base_module.deinit();
+        self.features.deinit();
+        // self.classifier.deinit();
         torch.global_allocator.destroy(self);
     }
 
@@ -480,12 +477,12 @@ fn efficientnetConf(arch: Arch, w_mult: ?f64, d_mult: ?f64, options: TensorOptio
             MBConvConfig.mbconv(6.0, 3, 1, 192, 320, 1, width_mult, depth_mult, options),
         },
     };
-    cfgs.appendSlice(_cfgs) catch unreachable;
+    cfgs.appendSlice(_cfgs) catch err(.AllocFailed);
     const last_channel: ?i64 = switch (arch) {
         .V2S, .V2M, .V2L => 1280,
         else => null,
     };
-    return .{ cfgs.toOwnedSlice() catch unreachable, last_channel };
+    return .{ cfgs.toOwnedSlice() catch err(.AllocFailed), last_channel };
 }
 
 pub fn efficientnetb0(num_classes: i64, options: TensorOptions) *EfficientNet {

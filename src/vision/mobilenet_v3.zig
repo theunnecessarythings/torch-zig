@@ -90,7 +90,7 @@ const SqueezeExcitation = struct {
     const Self = @This();
 
     pub fn init(c_in: i64, c_squeeze: i64, options: TensorOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch torch.utils.err(.AllocFailed);
         self.* = Self{};
         self.base_module = Module.init(self);
         self.fc1 = Conv2D.init(.{ .in_channels = c_in, .out_channels = c_squeeze, .kernel_size = .{ 1, 1 }, .tensor_opts = options });
@@ -100,8 +100,6 @@ const SqueezeExcitation = struct {
     }
 
     pub fn reset(self: *Self) void {
-        self.fc1.reset();
-        self.fc2.reset();
         _ = self.base_module.registerModule("fc1", self.fc1);
         _ = self.base_module.registerModule("fc2", self.fc2);
     }
@@ -129,7 +127,7 @@ const InvertedResidual = struct {
     const Self = @This();
 
     pub fn init(comptime cfg: InvertedResidualConfig) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch torch.utils.err(.AllocFailed);
         self.* = Self{ .use_res_connect = cfg.stride == 1 and cfg.c_in == cfg.c_out };
         self.base_module = Module.init(self);
         const activation = switch (cfg.use_hs) {

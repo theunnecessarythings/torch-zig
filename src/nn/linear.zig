@@ -4,6 +4,7 @@ const std = @import("std");
 const Module = @import("module.zig").Module;
 const ModuleGen = @import("module.zig").ModuleGen;
 const nn_init = @import("init.zig");
+const err = torch.utils.err;
 
 pub const LinearOptions = struct {
     in_features: i64,
@@ -56,7 +57,7 @@ pub const Identity = struct {
     const Self = @This();
 
     pub fn init() *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{};
         self.base_module = Module.init(self);
         self.reset();
@@ -105,7 +106,7 @@ pub const Linear = struct {
     const Self = @This();
 
     pub fn init(options: LinearOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{
             .options = options,
         };
@@ -177,7 +178,7 @@ pub const Flatten = struct {
     const Self = @This();
 
     pub fn init(options: FlattenOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{
             .options = options,
         };
@@ -220,7 +221,7 @@ pub const Unflatten = struct {
     const Self = @This();
 
     pub fn init(options: UnflattenOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{
             .options = options,
         };
@@ -275,7 +276,7 @@ pub const Bilinear = struct {
     const Self = @This();
 
     pub fn init(options: BilinearOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{
             .options = options,
         };

@@ -65,7 +65,7 @@ const BasicBlock = struct {
         stride: i64,
         options: TensorOptions,
     ) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch torch.utils.err(.AllocFailed);
         self.* = Self{};
         self.base_module = Module.init(self);
 
@@ -90,19 +90,14 @@ const BasicBlock = struct {
         _ = self.base_module.registerModule("conv2", self.conv2);
         _ = self.base_module.registerModule("bn2", self.bn2);
         _ = self.base_module.registerModule("downsample", self.downsample);
-        self.conv1.reset();
-        self.bn1.reset();
-        self.conv2.reset();
-        self.bn2.reset();
-        self.downsample.reset();
     }
 
     pub fn deinit(self: *Self) void {
         self.base_module.deinit();
-        self.conv1.deinit();
-        self.bn1.deinit();
-        self.conv2.deinit();
-        self.bn2.deinit();
+        // self.conv1.deinit();
+        // self.bn1.deinit();
+        // self.conv2.deinit();
+        // self.bn2.deinit();
         self.downsample.deinit();
     }
 
@@ -140,7 +135,7 @@ pub const Bottleneck = struct {
         base_width: i64,
         options: TensorOptions,
     ) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch torch.utils.err(.AllocFailed);
         self.* = Self{};
         self.base_module = Module.init(self);
         const width = @divExact(planes * base_width, 64) * groups;
@@ -169,23 +164,16 @@ pub const Bottleneck = struct {
         _ = self.base_module.registerModule("conv3", self.conv3);
         _ = self.base_module.registerModule("bn3", self.bn3);
         _ = self.base_module.registerModule("downsample", self.downsample);
-        self.conv1.reset();
-        self.bn1.reset();
-        self.conv2.reset();
-        self.bn2.reset();
-        self.conv3.reset();
-        self.bn3.reset();
-        self.downsample.reset();
     }
 
     pub fn deinit(self: *Self) void {
         self.base_module.deinit();
-        self.conv1.deinit();
-        self.bn1.deinit();
-        self.conv2.deinit();
-        self.bn2.deinit();
-        self.conv3.deinit();
-        self.bn3.deinit();
+        // self.conv1.deinit();
+        // self.bn1.deinit();
+        // self.conv2.deinit();
+        // self.bn2.deinit();
+        // self.conv3.deinit();
+        // self.bn3.deinit();
         self.downsample.deinit();
     }
 
@@ -219,7 +207,7 @@ pub const Resnet = struct {
     const Self = @This();
 
     pub fn init(options: ResnetOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch torch.utils.err(.AllocFailed);
         self.* = Self{
             .options = options,
         };
@@ -285,13 +273,13 @@ pub const Resnet = struct {
 
     pub fn deinit(self: *Self) void {
         self.base_module.deinit();
-        self.conv1.deinit();
-        self.bn1.deinit();
+        // self.conv1.deinit();
+        // self.bn1.deinit();
         self.layer1.deinit();
         self.layer2.deinit();
         self.layer3.deinit();
         self.layer4.deinit();
-        self.fc.deinit();
+        // self.fc.deinit();
         torch.global_allocator.destroy(self);
     }
 
@@ -303,9 +291,6 @@ pub const Resnet = struct {
         _ = self.base_module.registerModule("layer3", self.layer3);
         _ = self.base_module.registerModule("layer4", self.layer4);
         _ = self.base_module.registerModule("fc", self.fc);
-        self.conv1.reset();
-        self.bn1.reset();
-        self.fc.reset();
     }
 
     pub fn forward(self: *Self, x: *const Tensor) Tensor {
@@ -318,7 +303,7 @@ pub const Resnet = struct {
         out = self.layer3.forward(&out);
         out = self.layer4.forward(&out);
         out = out.adaptiveAvgPool2d(&.{ 1, 1 });
-        out = out.flatten(0, -1);
+        out = out.flatten(1, -1);
         out = self.fc.forward(&out);
         return out;
     }
@@ -339,7 +324,7 @@ pub const Resnet = struct {
                 const blk = BasicBlock.init(
                     inplanes,
                     planes,
-                    1,
+                    stride,
                     self.options.tensor_options,
                 );
                 layers = layers.add(blk);

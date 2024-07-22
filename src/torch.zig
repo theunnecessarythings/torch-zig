@@ -13,6 +13,7 @@ pub const conv = @import("nn/conv.zig");
 pub const norm = @import("nn/norm.zig");
 pub const module = @import("nn/module.zig");
 pub const functional = @import("nn/functional.zig");
+pub const safetensors = @import("safetensors.zig");
 pub const vision = struct {
     pub const resnet = @import("vision/resnet.zig");
     pub const alexnet = @import("vision/alexnet.zig");
@@ -20,13 +21,14 @@ pub const vision = struct {
     pub const densenet = @import("vision/densenet.zig");
     pub const efficientnet = @import("vision/efficientnet.zig");
     pub const inception = @import("vision/inception.zig");
-    pub const googlenet = @import("vision/googlenet.zig");
     pub const mnasnet = @import("vision/mnasnet.zig");
     pub const mobilenetv2 = @import("vision/mobilenet_v2.zig");
     pub const mobilenetv3 = @import("vision/mobilenet_v3.zig");
     pub const shufflenetv2 = @import("vision/shufflenet_v2.zig");
     pub const squeezenet = @import("vision/squeezenet.zig");
     pub const vgg = @import("vision/vgg.zig");
+    pub const vit = @import("vision/vit.zig");
+    pub const swin_transformer = @import("vision/swin_transformer.zig");
 };
 // TODO: we don't have the error generating/fallible functions right now, probably need
 // // to add them for usecases where fallback is needed instead of panic
@@ -55,14 +57,14 @@ pub const TensorPool = struct {
 
     fn _init(self: *TensorPool) void {
         self.pool = std.StringArrayHashMap(std.ArrayList(c.tensor)).init(global_allocator);
-        self.pool.?.put("default", std.ArrayList(c.tensor).init(global_allocator)) catch unreachable;
+        self.pool.?.put("default", std.ArrayList(c.tensor).init(global_allocator)) catch utils.err(.AllocFailed);
     }
 
     pub fn addPool(self: *TensorPool, name: []const u8) void {
         if (self.pool == null) {
             self._init();
         }
-        self.pool.?.put(name, std.ArrayList(c.tensor).init(global_allocator)) catch unreachable;
+        self.pool.?.put(name, std.ArrayList(c.tensor).init(global_allocator)) catch utils.err(.AllocFailed);
     }
 
     pub fn removePool(self: *TensorPool, name: []const u8) void {
@@ -95,7 +97,7 @@ pub const TensorPool = struct {
     }
 
     pub fn freeAll(self: *TensorPool) void {
-        for (self.pool.?.values()) |pool| {
+        for (self.pool.?.values()) |*pool| {
             for (pool.items) |tensor| {
                 c.at_free(tensor);
                 readAndCleanError();
@@ -113,9 +115,10 @@ pub const TensorPool = struct {
         if (self.pool == null) {
             self._init();
         }
-        var pool = self.pool.?.getPtr(name) orelse {
-            std.log.warn("Pool does not exist, creating it: {}\n", .{name});
+        var pool = self.pool.?.getPtr(name) orelse e: {
+            std.log.warn("Pool does not exist, creating it: {s}\n", .{name});
             self.addPool(name);
+            break :e self.pool.?.getPtr(name).?;
         };
         pool.append(tensor) catch {
             @panic("Failed to append tensor to pool");
@@ -568,6 +571,7 @@ pub const Image = struct {
         const path_ = try global_allocator.dupeZ(u8, path);
         defer global_allocator.free(path_);
         const ret = c.at_load_image(path_);
+        memory_pool.putToPool(memory_pool.default, ret);
         readAndCleanError();
         return Tensor{ .c_tensor = ret };
     }
@@ -576,6 +580,7 @@ pub const Image = struct {
         const data_ = try global_allocator.dupe(u8, data);
         defer global_allocator.free(data_);
         const ret = c.at_load_image_from_memory(data_, data.len);
+        memory_pool.putToPool(memory_pool.default, ret);
         readAndCleanError();
         return Tensor{ .c_tensor = ret };
     }
@@ -589,6 +594,7 @@ pub const Image = struct {
 
     pub fn resizeHWC(tensor: Tensor, width: i64, height: i64) Tensor {
         const ret = c.at_resize_image(tensor.c_tensor, width, height);
+        memory_pool.putToPool(memory_pool.default, ret);
         readAndCleanError();
         return Tensor{ .c_tensor = ret };
     }
@@ -691,6 +697,7 @@ pub const MemoryGuard = struct {
     }
 
     pub fn deinit(self: MemoryGuard) void {
+        std.debug.print("Freeing pool: `{s}` -> {d} tensors\n", .{ memory_pool.default, memory_pool.pool.?.get(memory_pool.default).?.items.len });
         memory_pool.freePool(memory_pool.default);
         memory_pool.default = self.original_state;
     }
@@ -746,4 +753,45 @@ pub fn autocastIsEnabled() bool {
 pub fn autocastSetEnabled(b: bool) void {
     c.at_autocast_set_enabled(b);
     readAndCleanError();
+}
+
+pub fn loadImage(path: []const u8) Tensor {
+    const ret = c.at_load_image(global_allocator.dupeZ(u8, path) catch utils.err(.AllocFailed));
+    memory_pool.putToPool(memory_pool.default, ret);
+    readAndCleanError();
+    return Tensor{ .c_tensor = ret };
+}
+
+pub fn loadImageFromMemory(data: []const u8) Tensor {
+    const ret = c.at_load_image_from_memory(global_allocator.dupeZ(u8, data) catch utils.err(.AllocFailed), data.len);
+    memory_pool.putToPool(memory_pool.default, ret);
+    readAndCleanError();
+    return Tensor{ .c_tensor = ret };
+}
+
+pub fn saveImage(tensor: *const Tensor, path: []const u8) void {
+    c.at_save_image(tensor.c_tensor, global_allocator.dupeZ(u8, path) catch utils.err(.AllocFailed));
+    readAndCleanError();
+}
+
+pub fn resizeImage(tensor: *const Tensor, width: i64, height: i64) Tensor {
+    const ret = c.at_resize_image(tensor.c_tensor, @intCast(width), @intCast(height));
+    memory_pool.putToPool(memory_pool.default, ret);
+    readAndCleanError();
+    return Tensor{ .c_tensor = ret };
+}
+
+fn addCallback(data: ?*anyopaque, name: [*c]const u8, tensor: c.tensor) callconv(.C) void {
+    const n = std.mem.replaceOwned(u8, global_allocator, std.mem.span(name), "|", ".") catch utils.err(.AllocFailed);
+    var v: *std.ArrayList(struct { []const u8, Tensor }) = @alignCast(@ptrCast(data.?));
+    v.append(.{ n, Tensor{ .c_tensor = tensor } }) catch utils.err(.AllocFailed);
+}
+
+pub fn loadz(path: []const u8) []struct { []const u8, Tensor } {
+    const path_ = global_allocator.dupeZ(u8, path) catch utils.err(.AllocFailed);
+    defer global_allocator.free(path_);
+    var v = std.ArrayList(struct { []const u8, Tensor }).init(global_allocator);
+    c.at_loadz_callback(path_, @ptrCast(&v), addCallback);
+    readAndCleanError();
+    return v.toOwnedSlice() catch utils.err(.AllocFailed);
 }

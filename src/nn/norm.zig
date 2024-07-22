@@ -5,6 +5,7 @@ const std = @import("std");
 const Module = @import("module.zig").Module;
 const ModuleGen = @import("module.zig").ModuleGen;
 const nn_init = @import("init.zig");
+const err = torch.utils.err;
 
 pub const BatchNormOptions = struct {
     num_features: i64,
@@ -124,7 +125,7 @@ pub fn BatchNorm(comptime D: usize) type {
         const Self = @This();
 
         pub fn init(options: BatchNormOptions) *Self {
-            var self = torch.global_allocator.create(Self) catch unreachable;
+            var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
             self.* = Self{
                 .options = options,
             };
@@ -213,7 +214,7 @@ pub fn InstanceNorm(comptime D: i64) type {
         const Self = @This();
 
         pub fn init(options: InstanceNormOptions) *Self {
-            var self = torch.global_allocator.create(Self) catch unreachable;
+            var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
             self.* = Self{
                 .options = options,
             };
@@ -296,7 +297,7 @@ pub const LayerNorm = struct {
     const Self = @This();
 
     pub fn init(options: LayerNormOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{
             .options = options,
         };
@@ -376,7 +377,7 @@ pub const GroupNorm = struct {
     const Self = @This();
 
     pub fn init(options: GroupNormOptions) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{
             .options = options,
         };

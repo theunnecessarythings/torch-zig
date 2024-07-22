@@ -5,6 +5,7 @@ const module = @import("module.zig");
 const nn_init = @import("init.zig");
 const Module = module.Module;
 const utils = torch.utils;
+const err = utils.err;
 
 pub const ConvPaddingMode = enum {
     Zeros,
@@ -111,7 +112,7 @@ pub const Conv1D = struct {
     const Self = @This();
 
     pub fn init(options: ConvOptions(1)) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{
             .options = options,
         };
@@ -168,7 +169,7 @@ pub const Conv2D = struct {
     const Self = @This();
 
     pub fn init(options: ConvOptions(2)) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{
             .options = options,
         };
@@ -226,7 +227,7 @@ pub const Conv3D = struct {
     const Self = @This();
 
     pub fn init(options: ConvOptions(3)) *Self {
-        var self = torch.global_allocator.create(Self) catch unreachable;
+        var self = torch.global_allocator.create(Self) catch err(.AllocFailed);
         self.* = Self{
             .options = options,
         };
