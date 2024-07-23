@@ -22,10 +22,10 @@ fn findLibtorchLibrary(b: *std.Build, path: []const u8, lib: []const u8) ?[]cons
 }
 
 pub fn build(b: *std.Build) void {
-    const LIBTORCH = "/home/sreeraj/libtorch";
-    const LIBTORCH_LIB = LIBTORCH ++ "/lib";
-    const CUDA_HOME = "/usr/local/cuda";
-    const CXX_COMPILER = "g++";
+    const LIBTORCH = b.option([]const u8, "LIBTORCH", "Path to libtorch") orelse "/home/sreeraj/libtorch";
+    const CUDA_HOME = b.option([]const u8, "CUDA_HOME", "Path to CUDA") orelse "/usr/local/cuda";
+    const CXX_COMPILER = b.option([]const u8, "CXX_COMPILER", "C++ compiler") orelse "g++";
+    const LIBTORCH_LIB = b.fmt("{s}/lib", .{LIBTORCH});
 
     const target = b.standardTargetOptions(.{});
 
@@ -47,9 +47,9 @@ pub fn build(b: *std.Build) void {
         "torch_api.cpp",
         "-o",
         "torch_api.o",
-        "-I" ++ LIBTORCH ++ "/include/",
-        "-I" ++ LIBTORCH ++ "/include/torch/csrc/api/include/",
-        "-I" ++ CUDA_HOME ++ "/include/",
+        b.fmt("-I{s}/include/", .{LIBTORCH}),
+        b.fmt("-I{s}/include/torch/csrc/api/include/", .{LIBTORCH}),
+        b.fmt("-I{s}/include/", .{CUDA_HOME}),
     });
     cmd_1.setCwd(b.path("libtch/"));
 
@@ -58,9 +58,9 @@ pub fn build(b: *std.Build) void {
         "torch_api_generated.cpp",
         "-o",
         "torch_api_generated.o",
-        "-I" ++ LIBTORCH ++ "/include/",
-        "-I" ++ LIBTORCH ++ "/include/torch/csrc/api/include/",
-        "-I" ++ CUDA_HOME ++ "/include/",
+        b.fmt("-I{s}/include/", .{LIBTORCH}),
+        b.fmt("-I{s}/include/torch/csrc/api/include/", .{LIBTORCH}),
+        b.fmt("-I{s}/include/", .{CUDA_HOME}),
     });
     cmd_2.setCwd(b.path("libtch/"));
     cmd_1.step.dependOn(&cmd_2.step);
@@ -73,13 +73,6 @@ pub fn build(b: *std.Build) void {
     });
     static_lib_cmd.step.dependOn(&cmd_2.step);
 
-    const build_lib_step = b.step("lib", "Build libtch.a");
-    build_lib_step.dependOn(&static_lib_cmd.step);
-    std.fs.cwd().access("libtch/libtch.a", .{}) catch {
-        std.log.info("libtch not built, build it using `zig build lib`", .{});
-        std.log.info("To force libtch rebuild if changes are made to `torch_api.cpp` or `torch_api_generated.cpp`, run `zig build lib`\n", .{});
-        // b.getInstallStep().dependOn(&static_lib_cmd.step);
-    };
     const torch_module = b.addModule("torch", .{
         .root_source_file = b.path("src/torch.zig"),
         .target = target,
@@ -123,7 +116,7 @@ pub fn build(b: *std.Build) void {
 
     const exe = b.addExecutable(.{
         .name = "torch_test",
-        .root_source_file = b.path("src/main.zig"),
+        .root_source_file = b.path("src/test_main.zig"),
         .target = target,
         .optimize = optimize,
         // .strip = true,
@@ -138,6 +131,16 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(exe);
 
+    const build_lib_step = b.option(bool, "lib", "Build libtch.a") orelse false;
+    if (build_lib_step) {
+        exe.step.dependOn(&static_lib_cmd.step);
+    } else {
+        std.fs.cwd().access("libtch/libtch.a", .{}) catch {
+            std.log.info("libtch not built, building it!!!", .{});
+            std.log.info("To force libtch rebuild if changes are made to `torch_api.cpp` or `torch_api_generated.cpp`, run `zig build -Dlib=true`\n", .{});
+            exe.step.dependOn(&static_lib_cmd.step);
+        };
+    }
     const run_cmd = b.addRunArtifact(exe);
 
     run_cmd.step.dependOn(b.getInstallStep());
@@ -148,7 +151,7 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
     const exe_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
+        .root_source_file = b.path("src/test_main.zig"),
         .target = target,
         .optimize = optimize,
     });
